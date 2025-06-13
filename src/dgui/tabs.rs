@@ -79,15 +79,15 @@ impl<'a, T: Copy> Tabs<'a, T> {
 
     fn draw_titles(&mut self, ui: &mut Ui) -> Response {
         const MONO: FontId = FontId::monospace(16.0);
-        let area_rect = ui.available_rect_before_wrap();
-        let titles = self.tabs;
+        let avail_rect = ui.available_rect_before_wrap();
+        let tabs = self.tabs;
         let (
             galleys,
             row_height,
             max_width,
         ) = ui.ctx().fonts(|fonts| {
             let mut max_width = <f32>::MIN;
-            let galleys: Vec<_> = titles.iter().map(|title| {
+            let galleys: Vec<_> = tabs.iter().map(|title| {
                 let galley = fonts.layout_no_wrap(title.title.into(), MONO, Color32::WHITE);
                 max_width = max_width.max(galley.size().x);
                 galley
@@ -98,22 +98,21 @@ impl<'a, T: Copy> Tabs<'a, T> {
                 max_width,
             )
         });
-        let tabs_size = vec2(area_rect.width(), row_height + self.padding.y * 2.0);
-        let (tabs_rect, mut resp) = ui.allocate_exact_size(tabs_size, Sense::empty());
-        ui.painter().rect_filled(tabs_rect, CornerRadius::ZERO, Color32::from_gray(30));
-        let equal_width = area_rect.width() / titles.len() as f32;
-        let mut x = tabs_rect.min.x;
+        let tab_bar_size = vec2(avail_rect.width(), row_height + self.padding.y * 2.0);
+        let (tab_bar_rect, mut resp) = ui.allocate_exact_size(tab_bar_size, Sense::empty());
+        ui.painter().rect_filled(tab_bar_rect, CornerRadius::ZERO, Color32::from_gray(30));
+        let mut x = tab_bar_rect.min.x;
         let mut tab_index_edit = *self.tab_index;
         let tab_index_edit = &mut tab_index_edit;
         galleys.into_iter().enumerate().for_each(|(index, galley)| {
             let tab_width = match self.size_mode {
                 TabSizeMode::Equal => max_width + self.padding.x * 2.0,
                 TabSizeMode::Shrink => galley.size().x + self.padding.x * 2.0,
-                TabSizeMode::Grow => equal_width,
+                TabSizeMode::Grow => avail_rect.width() / tabs.len() as f32,
                 TabSizeMode::Exact(width) => width,
                 TabSizeMode::ShrinkMin(min) => (galley.size().x + self.padding.x * 2.0).max(min),
             };
-            let tab_rect = Rect::from_min_size(pos2(x, tabs_rect.min.y), vec2(tab_width, tabs_rect.height()));
+            let tab_rect = Rect::from_min_size(pos2(x, tab_bar_rect.min.y), vec2(tab_width, tab_bar_rect.height()));
             let text_rect = tab_rect.shrink2(self.padding);
             let align = self.text_align;
             let text_pos = match align {

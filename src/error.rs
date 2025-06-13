@@ -11,6 +11,8 @@ pub enum Error {
     TempfilePersistError(#[from] tempfile::PersistError),
     #[error("Temporary Error: {0}")]
     TempErr(&'static str),
+    #[error("Toml Decode Error: {0}")]
+    TomlDecodeError(#[from] toml::de::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

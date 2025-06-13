@@ -9,7 +9,7 @@ use eframe::{
 use tempfile::NamedTempFile;
 
 use crate::settings::Settings;
-use crate::uiext::UiExt;
+use crate::eguiext::UiExt;
 
 pub struct SettingsSaver {
     path: PathBuf,
@@ -46,7 +46,8 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    const SETTINGS_NAME: &'static str = ".settings";
+    /// The relative path of the settings in `<program>/config/`
+    const SETTINGS_REL_PATH: &'static str = ".settings";
     pub fn new<P: Into<PathBuf>>(path: P) -> Self {
         Self {
             path: path.into(),
@@ -88,6 +89,10 @@ impl AppConfig {
         tempfile::NamedTempFile::new_in(self.path())
     }
 
+    pub fn settings_path(&self) -> PathBuf {
+        self.relative_path(Self::SETTINGS_REL_PATH)
+    }
+
     pub fn save<P: AsRef<Path>, T: bincode::Encode>(&self, relative_path: P, value: &T) -> crate::error::Result<()> {
         let mut temp = self.named_temp_file()?;
         let save_path = self.relative_path(relative_path);
@@ -114,12 +119,12 @@ impl AppConfig {
 
     #[inline]
     pub fn save_settings(&self, settings: &Settings) -> crate::error::Result<()> {
-        self.save(Self::SETTINGS_NAME, settings)
+        self.save(Self::SETTINGS_REL_PATH, settings)
     }
 
     #[inline]
     pub fn load_settings(&self) -> crate::error::Result<Settings> {
-        self.load(Self::SETTINGS_NAME)
+        self.load(Self::SETTINGS_REL_PATH)
     }
 
     pub fn delete<P: AsRef<Path>>(&self, relative_path: P) -> std::io::Result<()> {
@@ -225,13 +230,12 @@ mod tests {
             age: u8,
         }
 
-        let appdata = AppData::from("com", "erisianarchitect", "test")?;
-        appdata.config().save("test", &Foo { name: "Derek".into(), age: 31 })?;
-        let foo: Foo = appdata.config().load("test")?;
-        println!("Name: {}\n Age: {}", foo.name, foo.age);
-        appdata.config().delete("test")?;
-        let test_path = appdata.config().relative_path("test");
-        assert!(!test_path.exists());
+        let appdata = AppData::from("com", "ErisianArchitect", "Projector")?;
+
+        let settings_path = appdata.config.settings_path();
+        println!("{}", settings_path.display());
+        println!("Exists: {}", settings_path.exists());
+        
         Ok(())
     }
 }

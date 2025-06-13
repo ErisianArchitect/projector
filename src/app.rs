@@ -6,7 +6,7 @@ use eframe::{
     egui::{self, *},
     App, CreationContext,
 };
-use crate::{appdata::AppData, uiext::UiExt};
+use crate::{appdata::AppData, eguiext::UiExt};
 use crate::settings::*;
 
 use crate::{settings::Settings, dgui::{self, tabs::{Tab, TabSizeMode, Tabs}}};
@@ -30,6 +30,7 @@ pub enum ProjectType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, bincode::Encode, bincode::Decode)]
 pub enum MainTab {
+    RecentProjects,
     Project(ProjectType),
     Text,
 }
@@ -43,6 +44,7 @@ impl Default for MainTab {
 impl MainTab {
     pub const fn text(self) -> &'static str {
         match self {
+            MainTab::RecentProjects => "Recent",
             MainTab::Project(ProjectType::Rust) => "Rust",
             MainTab::Project(ProjectType::Python) => "Python",
             MainTab::Project(ProjectType::Web) => "Web",
@@ -108,20 +110,26 @@ impl ProjectorApp {
     pub fn boxed_new(cc: &CreationContext<'_>) -> Box<Self> {
         let app_data = AppData::from("com", "erisianarchitect", "projector").expect("Failed to create AppData object.");
         app_data.ensure_dirs();
-        Box::new(Self {
-            settings: {
-                let settings = app_data.config().load_settings();
-                match settings {
-                    Ok(settings) => settings,
-                    Err(err) => {
-                        eprintln!("Failed to load settings. Loading default settings instead. {err}");
-                        Settings::default()
-                    },
-                }
+        let settings = match app_data.config().load_settings() {
+            Ok(settings) => settings,
+            Err(err) => {
+                eprintln!("Failed to load settings. Loading default settings instead. {err}");
+                Settings::default()
             },
-            language_tab: MainTab::Project(ProjectType::Rust),
+        };
+        Box::new(Self {
+            tab_index: match settings.general.default_projects_tab {
+                MainTab::RecentProjects => 0,
+                MainTab::Project(project_type) => match project_type {
+                    ProjectType::Rust => 1,
+                    ProjectType::Python => 2,
+                    ProjectType::Web => 3,
+                },
+                MainTab::Text => 4,
+            },
+            language_tab: settings.general.default_projects_tab,
+            settings,
             dialog: ModalUi::None,
-            tab_index: 0,
             size_mode: TabSizeMode::Equal,
             quick_edit_text: String::with_capacity(Self::QUICK_EDIT_CAPACITY),
             app_data,
@@ -172,6 +180,7 @@ impl App for ProjectorApp {
             // ui.style_mut().spacing.menu_margin = Margin::ZERO;
             set_style(ui.style_mut());
             let tabs = &[
+                Tab::new("Recent", MainTab::RecentProjects),
                 Tab::new("Rust", MainTab::Project(ProjectType::Rust)),
                 Tab::new("Python", MainTab::Project(ProjectType::Python)),
                 Tab::new("Web", MainTab::Project(ProjectType::Web)),
@@ -186,6 +195,9 @@ impl App for ProjectorApp {
                 .show(ui, |index, tab, ui| {
                     // ui.painter().rect_stroke(ui.max_rect(), CornerRadius::ZERO, Stroke::new(2.0, Color32::RED), StrokeKind::Outside);
                     match tab {
+                        MainTab::RecentProjects => {
+                            
+                        }
                         MainTab::Project(ProjectType::Rust) => {
                             ui.with_layout(Layout::top_down(Align::Center), |ui| {
                                 Grid::new("rust_project_tab_grid")
@@ -215,7 +227,28 @@ impl App for ProjectorApp {
                             });
                         }
                         MainTab::Project(ProjectType::Python) => {
-                            
+                            // let (bar_rect, _) = ui.allocate_exact_size(vec2(ui.available_width() / 2.0, 24.0), Sense::empty());
+                            // ui.painter().rect_filled(bar_rect, CornerRadius::ZERO, Color32::DARK_GREEN);
+                            // fn cont<F: FnOnce(&mut Ui) -> Response>(add_contents: F) -> F {
+                            //     add_contents
+                            // }
+                            ui.spacing_mut().menu_margin = Margin::ZERO;
+                            ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
+                                ui.spacing_mut().item_spacing = Vec2::ZERO;
+                                let (btn_rect, btn) = ui.allocate_exact_size(vec2(100.0, 24.0), Sense::click());
+                                let style = ui.style().visuals.widgets.style(&btn);
+                                ui.painter().rect(btn_rect, CornerRadius::ZERO, style.bg_fill, style.bg_stroke, StrokeKind::Inside);
+                                if btn.clicked() {
+                                    println!("Test click.");
+                                }
+                                let (btn_rect, btn) = ui.allocate_exact_size(vec2(100.0, 24.0), Sense::click());
+                                let style = ui.style().visuals.widgets.style(&btn);
+                                ui.painter().rect(btn_rect, CornerRadius::ZERO, style.bg_fill, style.bg_stroke, StrokeKind::Inside);
+                                if btn.clicked() {
+                                    println!("Test click.");
+                                }
+                                btn
+                            });
                         }
                         MainTab::Project(ProjectType::Web) => {
                             

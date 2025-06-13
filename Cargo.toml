@@ -2,11 +2,15 @@
 name = "projector"
 version = "0.1.0"
 edition = "2021"
+description = "A simple personalized project opener/creator."
+repository = "https://github.com/ErisianArchitect/projector"
 
 [dependencies]
 bincode = { version = "2.0.1", features = ["derive"] }
 directories = "6.0.0"
 eframe = "0.31.1"
+notify = "8.0.0"
 rfd = "0.15.3"
 tempfile = "3.20.0"
 thiserror = "2.0.12"
+toml = "0.8.23"
