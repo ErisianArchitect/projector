@@ -1,7 +1,9 @@
-use eframe::egui::{self, *};
+use eframe::{egui::{self, *}, glow::ZERO};
+
+use crate::eguiext::UiExt;
 
 
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, bincode::Decode, bincode::Encode)]
 pub enum TabSizeMode {
     /// All tabs are equal sized, based on the largest required size.
     #[default]
@@ -45,11 +47,12 @@ pub struct Tabs<'a, T: Copy> {
     tabs: &'a [Tab<'a, T>],
     size_mode: TabSizeMode,
     text_align: Align,
-    padding: Vec2,
+    title_padding: Vec2,
+    padding: Margin,
 }
 
 impl<'a, T: Copy> Tabs<'a, T> {
-    pub const fn new(
+    pub fn new(
         tab_index: &'a mut usize,
         tabs: &'a [Tab<'a, T>],
     ) -> Self {
@@ -58,7 +61,8 @@ impl<'a, T: Copy> Tabs<'a, T> {
             tabs,
             size_mode: TabSizeMode::Equal,
             text_align: Align::Min,
-            padding: Vec2::new(16.0, 8.0),
+            title_padding: Vec2::new(16.0, 8.0),
+            padding: Margin::from(vec2(0.0, 0.0)),
         }
     }
 
@@ -72,14 +76,23 @@ impl<'a, T: Copy> Tabs<'a, T> {
         self
     }
 
-    pub fn with_padding(mut self, padding: Vec2) -> Self {
-        self.padding = padding;
+    pub fn with_title_padding(mut self, padding: Vec2) -> Self {
+        self.title_padding = padding;
+        self
+    }
+
+    pub fn with_padding(mut self, padding: impl Into<Margin>) -> Self {
+        self.padding = padding.into();
         self
     }
 
     fn draw_titles(&mut self, ui: &mut Ui) -> Response {
         const MONO: FontId = FontId::monospace(16.0);
         let avail_rect = ui.available_rect_before_wrap();
+        // let avail_width = avail_rect.width();
+        let avail_width = avail_rect.width();
+        let alloc_width = avail_width;
+        // ui.set_max_width(alloc_width);
         let tabs = self.tabs;
         let (
             galleys,
@@ -98,22 +111,24 @@ impl<'a, T: Copy> Tabs<'a, T> {
                 max_width,
             )
         });
-        let tab_bar_size = vec2(avail_rect.width(), row_height + self.padding.y * 2.0);
+        let tab_bar_size = vec2(alloc_width, row_height + self.title_padding.y * 2.0);
+        // This is where the space for the entire tab bar is allocated in the Ui.
         let (tab_bar_rect, mut resp) = ui.allocate_exact_size(tab_bar_size, Sense::empty());
+        // tab_bar_rect.set_width(avail_width);
         ui.painter().rect_filled(tab_bar_rect, CornerRadius::ZERO, Color32::from_gray(30));
         let mut x = tab_bar_rect.min.x;
         let mut tab_index_edit = *self.tab_index;
         let tab_index_edit = &mut tab_index_edit;
         galleys.into_iter().enumerate().for_each(|(index, galley)| {
             let tab_width = match self.size_mode {
-                TabSizeMode::Equal => max_width + self.padding.x * 2.0,
-                TabSizeMode::Shrink => galley.size().x + self.padding.x * 2.0,
-                TabSizeMode::Grow => avail_rect.width() / tabs.len() as f32,
+                TabSizeMode::Equal => max_width + self.title_padding.x * 2.0,
+                TabSizeMode::Shrink => galley.size().x + self.title_padding.x * 2.0,
+                TabSizeMode::Grow => alloc_width / tabs.len() as f32,
                 TabSizeMode::Exact(width) => width,
-                TabSizeMode::ShrinkMin(min) => (galley.size().x + self.padding.x * 2.0).max(min),
+                TabSizeMode::ShrinkMin(min) => (galley.size().x + self.title_padding.x * 2.0).max(min),
             };
             let tab_rect = Rect::from_min_size(pos2(x, tab_bar_rect.min.y), vec2(tab_width, tab_bar_rect.height()));
-            let text_rect = tab_rect.shrink2(self.padding);
+            let text_rect = tab_rect.shrink2(self.title_padding);
             let align = self.text_align;
             let text_pos = match align {
                 Align::Min => {
@@ -136,16 +151,24 @@ impl<'a, T: Copy> Tabs<'a, T> {
             if (galley.size().x + style.fg_stroke.width * 2.0) > tab_width {
                 resp.on_hover_text(galley.text());
             }
+            // color for selected/unselected tabs.
             let (unselected, fill_color) = if index == *tab_index_edit {
                 (false, ui.style().visuals.extreme_bg_color)
             } else {
                 (true, style.bg_fill)
             };
+
             let p = ui.painter_at(tab_rect);
+            // paint tab fill color
             p.rect_filled(tab_rect, CornerRadius::ZERO, fill_color);
             if unselected {
+                // paint tab stroke only when tab is unselected.
                 p.rect_stroke(tab_rect, CornerRadius::ZERO, style.fg_stroke, StrokeKind::Inside);
+            } else {
+                let select_rect = Rect::from_min_size(tab_rect.min, vec2(tab_rect.width(), 2.0));
+                p.rect_filled(select_rect, CornerRadius::ZERO, Color32::from_rgb(68, 166, 198)); //rgb(68,166,198)
             }
+            // paint tab title.
             p.galley(text_pos, galley, style.text_color());
 
             x += tab_width;
@@ -158,26 +181,38 @@ impl<'a, T: Copy> Tabs<'a, T> {
     }
 
     pub fn show<R, F: FnOnce(usize, T, &mut Ui) -> R>(&mut self, ui: &mut Ui, f: F) -> R {
-        ui.with_layout(Layout::top_down_justified(Align::Min), |ui| {
-            Frame::new().show(ui, |ui| {
+        let avail_rect = ui.available_rect_before_wrap();
+        let max_width = avail_rect.width();
+        ui.set_max_width(max_width);
+        let result = ui.allocate_new_ui(
+            UiBuilder::new()
+                .layout(Layout::top_down(Align::Min))
+                // .max_rect(avail_rect)
+                .sizing_pass(),
+            |ui| {
                 let spacing = ui.spacing().item_spacing;
                 ui.spacing_mut().item_spacing = Vec2::ZERO;
-                self.draw_titles(ui);
-                ui.with_layout(Layout::centered_and_justified(Direction::TopDown), |ui| {
-                    ui.spacing_mut().item_spacing = spacing;
-                    ui.set_min_size(ui.available_size());
-                    Frame::new()
+                ui.set_min_width(max_width);
+                ui.set_max_width(max_width);
+                // let spacing = ui.spacing().item_spacing;
+                // ui.spacing_mut().item_spacing = Vec2::ZERO;
+                // ui.spacing_mut().window_margin = Margin::ZERO;
+                Frame::NONE.show(ui, |ui| {
+                    let remaining_rect = ui.available_rect_before_wrap();
+                    ui.allocate_new_ui(UiBuilder::new().max_rect(remaining_rect).layout(Layout::default()), |ui| {
+                        // ui.spacing_mut().item_spacing = spacing;
+                        self.draw_titles(ui);
+                        Frame::NONE
                         .fill(ui.style().visuals.extreme_bg_color)
-                        .corner_radius(CornerRadius::ZERO)
-                        .inner_margin(8.0)
                         .show(ui, |ui| {
-                            ui.with_layout(Layout::default(), |ui| {
-                                f(*self.tab_index, self.tabs[*self.tab_index].value, ui)
-                            }).inner
+                            ui.spacing_mut().item_spacing = spacing;
+                            ui.set_min_width(ui.available_width());
+                            ui.set_max_width(ui.available_width());
+                            f(*self.tab_index, self.tabs[*self.tab_index].value, ui)
                         }).inner
+                    }).inner
                 }).inner
-            }).inner
-        }).inner
+            }).inner;
+        result
     }
-
 }

@@ -7,3 +7,5 @@ pub mod error;
 pub mod eguiext;
 pub mod settings;
 pub mod projects;
+pub mod util;
+pub mod fp;

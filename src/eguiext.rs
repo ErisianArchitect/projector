@@ -6,11 +6,13 @@ use eframe::{
 pub trait UiExt {
     fn rtl_label(&mut self, valign: Align, text: impl Into<WidgetText>) -> Response;
     fn allocate_blank_response(&mut self) -> Response;
+    fn debug_rect(&mut self, rect: Rect);
 }
 
 impl UiExt for Ui {
     #[inline]
     fn rtl_label(&mut self, valign: Align, text: impl Into<WidgetText>) -> Response {
+        let text: WidgetText = text.into();
         self.with_layout(Layout::right_to_left(valign), |ui| {
             ui.label(text)
         }).inner
@@ -19,6 +21,11 @@ impl UiExt for Ui {
     #[inline]
     fn allocate_blank_response(&mut self) -> Response {
         self.allocate_exact_size(Vec2::ZERO, Sense::empty()).1
+    }
+
+    #[inline]
+    fn debug_rect(&mut self, rect: Rect) {
+        self.painter().rect_stroke(rect, CornerRadius::ZERO, Stroke::new(1.0, Color32::RED), StrokeKind::Inside);
     }
 }
 

@@ -8,9 +8,11 @@ repository = "https://github.com/ErisianArchitect/projector"
 [dependencies]
 bincode = { version = "2.0.1", features = ["derive"] }
 directories = "6.0.0"
-eframe = "0.31.1"
+eframe = { version = "0.31.1", features = ["persistence"] }
 notify = "8.0.0"
 rfd = "0.15.3"
+run_script = "0.11.0"
+strfmt = "0.2.4"
 tempfile = "3.20.0"
 thiserror = "2.0.12"
 toml = "0.8.23"
