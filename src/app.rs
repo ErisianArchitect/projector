@@ -246,6 +246,7 @@ impl ProjectorApp {
 
 impl App for ProjectorApp {
     fn save(&mut self, _storage: &mut dyn eframe::Storage) { 
+        println!("Program Data Saved.");
         self.save_internal();
     }
 
@@ -274,8 +275,10 @@ impl App for ProjectorApp {
                         std::process::Command::new(curr_exe).spawn().expect("Failed to spawn process.");
                     }
                     if ui.button("Exit").clicked() {
-                        self.save_internal();
                         ctx.send_viewport_cmd(ViewportCommand::Close);
+                    }
+                    if ui.button("Create Project").clicked() {
+                        println!("Create Project Clicked.");
                     }
                 });
             });
