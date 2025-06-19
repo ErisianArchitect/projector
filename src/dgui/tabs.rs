@@ -1,6 +1,6 @@
 use eframe::{egui::{self, *}, glow::ZERO};
 
-use crate::eguiext::UiExt;
+use crate::ext::UiExt;
 
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, bincode::Decode, bincode::Encode)]

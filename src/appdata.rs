@@ -9,7 +9,7 @@ use eframe::{
 use tempfile::NamedTempFile;
 
 use crate::settings::Settings;
-use crate::eguiext::UiExt;
+use crate::ext::UiExt;
 
 pub struct SettingsSaver {
     path: PathBuf,

@@ -5,12 +5,13 @@ use eframe::{
 use crate::projects::ProjectPath;
 
 
+/// Not to be confused with [Recents].
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RecentProject<'a> {
+pub struct Recent<'a> {
     path: &'a ProjectPath,
 }
 
-impl<'a> RecentProject<'a> {
+impl<'a> Recent<'a> {
 
     #[inline]
     pub const fn new(path: &'a ProjectPath) -> Self {
@@ -60,4 +61,9 @@ impl<'a> RecentProject<'a> {
 
         resp
     }
+}
+
+/// Not to be confused with [Recent].
+pub struct Recents {
+
 }

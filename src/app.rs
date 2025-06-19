@@ -5,7 +5,7 @@ use std::{collections::VecDeque, io::Write, os::windows::process::CommandExt, pa
 use eframe::{
     egui::{self, Style, *}, epaint::tessellator::path, App, CreationContext
 };
-use crate::{appdata::AppData, dgui::recents::RecentProject, eguiext::UiExt, projects::ProjectPath};
+use crate::{appdata::AppData, dgui::recents::Recent, ext::{BoolExt, CloserBoolExt, UiExt}, project_wizard::ProjectWizard, projects::ProjectPath};
 use crate::settings::*;
 
 use crate::{settings::Settings, dgui::{self, tabs::{Tab, TabSizeMode, Tabs}}};
@@ -71,15 +71,11 @@ impl Default for ProgramState {
     }
 }
 
-pub struct CreateProjectDialog {
-
-}
-
 
 pub enum ModalUi {
     None,
     Settings(SettingsDialog),
-    CreateProject(CreateProjectDialog),
+    ProjectWizard(ProjectWizard),
 }
 
 impl ModalUi {
@@ -284,7 +280,7 @@ impl App for ProjectorApp {
             });
         CentralPanel::default().frame(Frame::new().inner_margin(0.0)).show(ctx, |ui| {
             let mut close = false;
-            let mut closer = DialogCloser::new(&mut close);
+            let mut closer = close.closer();
             match &mut self.dialog {
                 ModalUi::None => (),
                 ModalUi::Settings(settings_dialog) => {
@@ -295,9 +291,13 @@ impl App for ProjectorApp {
                         ui,
                     );
                 },
-                ModalUi::CreateProject(create_project_dialog) => {
-
-                },
+                ModalUi::ProjectWizard(wizard) => {
+                    wizard.show(
+                        closer,
+                        &self.settings,
+                        ui,
+                    );
+                }
             }
             if close {
                 self.dialog.close();
@@ -357,7 +357,7 @@ impl App for ProjectorApp {
                                             ProjectPath::Web(path_buf) => path_buf.as_path(),
                                             ProjectPath::Other(path_buf) => path_buf.as_path(),
                                         };
-                                        let recent = RecentProject::new(proj);
+                                        let recent = Recent::new(proj);
                                         let recent_resp = recent.ui(ui);
                                         if recent_resp.clicked() {
                                             self.open_in_editor(path);
@@ -370,41 +370,52 @@ impl App for ProjectorApp {
                                         recent_resp.context_menu(|ui| {
                                             set_style(ui.style_mut());
                                             ui.label(format!("{}", path.display()));
-                                            let (toggle, open_in_editor) = ui.horizontal(|ui| {
-                                                let toggle = ui.checkbox(&mut open_editor_toggle, "");
-                                                let open_in_editor = ui.button("Open in Editor");
-                                                (toggle, open_in_editor)
-                                            }).inner;
-                                            if open_in_editor.clicked() {
-                                                self.open_in_editor(path);
-                                                ui.close_menu();
+
+                                            let reveal_in_explorer = ui.add(
+                                                Button::new("Reveal in File Explorer")
+                                                    .corner_radius(CornerRadius::ZERO)
+                                                    .selected(open_explorer_toggle)
+                                            );
+                                            if reveal_in_explorer.secondary_clicked() {
+                                                open_explorer_toggle.toggle();
                                             }
-                                            open_in_editor.on_hover_text(&self.settings.general.editor_command);
-                                            
-                                            let (toggle, open_terminal_here) = ui.horizontal(|ui| {
-                                                let toggle = ui.checkbox(&mut open_shell_toggle, "");
-                                                let open_terminal_here = ui.button("Open Terminal Here");
-                                                (toggle, open_terminal_here)
-                                            }).inner;
-                                            if open_terminal_here.clicked() {
-                                                self.open_terminal_here(path);
-                                                ui.close_menu();
-                                            }
-                                            open_terminal_here.on_hover_text(&self.settings.general.shell_command);
-                                            
-                                            let (toggle, reveal_in_explorer) = ui.horizontal(|ui| {
-                                                let toggle = ui.checkbox(&mut open_explorer_toggle, "");
-                                                let reveal_in_explorer = ui.button("Reveal in File Explorer");
-                                                (toggle, reveal_in_explorer)
-                                            }).inner;
                                             if reveal_in_explorer.clicked() {
                                                 self.reveal_in_file_explorer(path);
                                                 ui.close_menu();
                                             }
                                             reveal_in_explorer.on_hover_text(&self.settings.general.explorer_command);
+                                            
+                                            let open_terminal_here = ui.add(
+                                                Button::new("Open Terminal Here")
+                                                    .corner_radius(CornerRadius::ZERO)
+                                                    .selected(open_shell_toggle)
+                                            );
+                                            if open_terminal_here.secondary_clicked() {
+                                                open_shell_toggle.toggle();
+                                            }
+                                            if open_terminal_here.clicked() {
+                                                self.open_terminal_here(path);
+                                                ui.close_menu();
+                                            }
+                                            open_terminal_here.on_hover_text(&self.settings.general.shell_command);
+
+                                            let open_in_editor = ui.add(
+                                                Button::new("Open in Editor")
+                                                    .corner_radius(CornerRadius::ZERO)
+                                                    .selected(open_editor_toggle)
+                                            );
+                                            if open_in_editor.secondary_clicked() {
+                                                open_editor_toggle.toggle();
+                                            }
+                                            if open_in_editor.clicked() {
+                                                self.open_in_editor(path);
+                                                ui.close_menu();
+                                            }
+                                            open_in_editor.on_hover_text(&self.settings.general.editor_command);
+
                                             let any_ticked = open_editor_toggle || open_shell_toggle || open_explorer_toggle;
                                             if any_ticked {
-                                                if ui.button("Run").clicked() {
+                                                if ui.button("Execute Multiple").clicked() {
                                                     if open_editor_toggle {
                                                         self.open_in_editor(path);
                                                         open_editor_toggle = false;

@@ -20,3 +20,11 @@ where
         right
     }
 }
+
+// /// This function only works with ascii strings.
+// pub fn match_rank<S0: AsRef<[u8]>, S1: AsRef<[u8]>>(left: S0, right: S1) -> u32 {
+//     fn inner(left: &[u8], right: &[u8]) -> u32 {
+
+//     }
+//     inner(left.as_ref(), right.as_ref())
+// }

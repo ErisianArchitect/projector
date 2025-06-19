@@ -6,7 +6,7 @@ use eframe::{
 use crate::{
     app::{
         MainTab, ModalUi, ProjectType
-    }, appdata::{AppData}, dgui::tabs::{Tab, TabSizeMode, Tabs}, eguiext::UiExt
+    }, appdata::{AppData}, dgui::tabs::{Tab, TabSizeMode, Tabs}, ext::UiExt
 };
 
 #[derive(Debug)]
@@ -380,7 +380,7 @@ impl SettingsDialog {
                         let bottom_shrink = bottom_rect.shrink(4.0);
                         let _bottom_resp = ui.put(bottom_shrink, |ui: &mut Ui| {
                             ui.horizontal(|ui| {
-                                let win_pos = ui.max_rect().left_bottom().to_vec2();
+                                let win_pos = bottom_rect.left_bottom();
                                 let close = ui.button("Close");
                                 if close.clicked() {
                                     self.request_close = true;
@@ -392,7 +392,9 @@ impl SettingsDialog {
                                         let int_size = ui.style().spacing.interact_size;
                                         Modal::new(Id::new("request_close_modal"))
                                             .area(Area::new(Id::new("request_close_modal_area"))
-                                                .anchor(Align2::LEFT_TOP, win_pos - vec2(0.0, 60.0))
+                                                // .anchor(Align2::LEFT_TOP, win_pos - vec2(0.0, 60.0))
+                                                .fixed_pos(win_pos)
+                                                .pivot(Align2::LEFT_BOTTOM)
                                             ).frame(frame)
                                             .show(ui.ctx(), |ui| {
                                                 crate::app::set_style(ui.style_mut());

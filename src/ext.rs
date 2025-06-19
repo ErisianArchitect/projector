@@ -2,6 +2,8 @@ use eframe::{
     egui::{self, *},
 };
 
+use crate::settings::DialogCloser;
+
 
 pub trait UiExt {
     fn rtl_label(&mut self, valign: Align, text: impl Into<WidgetText>) -> Response;
@@ -36,5 +38,27 @@ pub trait ResponseExt {
 impl ResponseExt for Response {
     fn merge(&mut self, response: Response) {
         *self = self.union(response)
+    }
+}
+
+pub trait CloserBoolExt {
+    fn closer(&mut self) -> DialogCloser<'_>;
+}
+
+impl CloserBoolExt for bool {
+    #[inline]
+    fn closer(&mut self) -> DialogCloser<'_> {
+        DialogCloser::new(self)
+    }
+}
+
+pub trait BoolExt {
+    fn toggle(&mut self);
+}
+
+impl BoolExt for bool {
+    #[inline]
+    fn toggle(&mut self) {
+        *self = !*self;
     }
 }
