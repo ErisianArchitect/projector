@@ -80,6 +80,9 @@ settings_structs!{
         } else {
             ""
         }),
+        pub dummy_string: String = String::from("dummy"),
+        pub dummy_toggle: bool = false,
+        pub clicker: u64 = 0,
     }
 
     #[derive(Debug, Clone, PartialEq, bincode::Encode, bincode::Decode)]
@@ -359,9 +362,6 @@ impl SettingsDialog {
                                             self.style_gui.ui(&mut self.settings_copy.style, ui)
                                         }).inner
                                 }
-                                SettingsTab::Extended("other") => {
-                                    ui.allocate_blank_response()
-                                }
                                 SettingsTab::Extended(name) => {
                                     Frame::NONE
                                         .inner_margin(Margin::same(8))
@@ -507,11 +507,17 @@ impl SettingsDialog {
                                 };
                                 match self.edit_state {
                                     EditState::Modified => {
-                                        ui.label("Modified");
+                                        ui.add(
+                                            Label::new("Modified")
+                                                .selectable(false)
+                                        ).on_hover_cursor(CursorIcon::Default);
                                     },
                                     EditState::Unaltered => (),
                                     EditState::Synced => {
-                                        ui.label("Synced");
+                                        ui.add(
+                                            Label::new("Synced")
+                                                .selectable(false)
+                                        ).on_hover_cursor(CursorIcon::Default);
                                     },
                                 }
                                 change_state.union(close)
@@ -550,70 +556,89 @@ pub struct StyleGui {
 impl GeneralGui {
     pub fn ui(&mut self, general: &mut General, ui: &mut Ui) -> Response {
         let avail = ui.available_rect_before_wrap();
-        Frame::NONE
-        .inner_margin(Margin::same(8))
-        .show(ui, |ui| {
-            ScrollArea::vertical()
-                .auto_shrink(Vec2b::FALSE)
-                .show(ui, |ui| {
-                    let grid_resp = Grid::new("general_settings")
-                        .num_columns(2)
-                        .striped(true)
-                        .show(ui, |ui| {
-                            ui.rtl_label(Align::Center, "Open After Create")
-                                .on_hover_text("Open projects in VS Code after they are created.");
-                            let open_after_create = ui.checkbox(&mut general.open_after_create, "");
-                            let mut resp = ResponseUpdater::new(open_after_create);
-                            ui.end_row();
+        ui.centered_and_justified(|ui| {
+            Frame::NONE
+            .inner_margin(Margin::same(8))
+            .show(ui, |ui| {
+                ui.setting_ui(160.0, "Test Label", "This is a test.", ui.style().visuals.faint_bg_color, |ui| {
+                    // _=ui.button("Test");
+                    // _=ui.button("Hello");
+                    _=ui.toggle_box(&mut general.open_after_create);
+                });
+                ui.setting_ui(160.0, "Click Counter", format!("This just counts how many times you've clicked the button. You've clicked it {} times.", general.clicker), ui.style().visuals.extreme_bg_color, |ui| {
+                    
+                });
+                ScrollArea::vertical()
+                    .auto_shrink(Vec2b::FALSE)
+                    .show(ui, |ui| {
+                        let grid_resp = Grid::new("general_settings")
+                            .num_columns(2)
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.rtl_label(Align::Center, "Open After Create")
+                                    .on_hover_text("Open projects in VS Code after they are created.");
+                                let open_after_create = ui.toggle_box(&mut general.open_after_create);
+                                let mut resp = ResponseUpdater::new(open_after_create);
+                                ui.end_row();
+        
+                                ui.rtl_label(Align::Center, "Close After Open")
+                                    .on_hover_text("Close the window after opening a project");
+                                let close_after_open = ui.toggle_box(&mut general.close_after_open);
+                                resp.merge(close_after_open);
+                                ui.end_row();
+                    
+                                ui.rtl_label(Align::Center, "Startup Projects Tab")
+                                    .on_hover_text("The default projects tab.");
+                                // let before = general.default_projects_tab;
+                                let startup_projects_tab = ComboBox::new("start_projects_tab_combo", "")
+                                    .selected_text(general.default_projects_tab.text())
+                                    .show_ui(ui, |ui| {
+                                        let recent_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::RecentProjects, "Recent");
+                                        let rust_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::Project(ProjectType::Rust), "Rust");
+                                        let python_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::Project(ProjectType::Python), "Python");
+                                        let web_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::Project(ProjectType::Web), "Web");
+                                        recent_label.union(rust_label).union(python_label).union(web_label)
+                                    }).inner;
+                                if let Some(slt_resp) = startup_projects_tab {
+                                    resp.merge(slt_resp);
+                                }
+                                ui.end_row();
+        
+                                ui.rtl_label(Align::Center, "Editor Command")
+                                    .on_hover_text(r#"The command that is executed to open a project path.\nUse `{path}` (without backticks) as a placeholder for the formatter.\nUse `{{` and `}}` to escape `{` and `}`.\nYou do not need to put quotes around `{path}`."#);
+                                let editor_command = ui.text_edit_singleline(&mut general.editor_command);
+                                resp.merge(editor_command);
+                                ui.end_row();
+        
+                                ui.rtl_label(Align::Center, "Open Shell Command")
+                                    .on_hover_text("The command to open an external shell.\nUse `{path}` (without backticks) as a placeholder for the formatter.\nUse `{{` and `}}` to escape `{` and `}`.\nYou do not need to put quotes around `{path}`.");
+                                let open_shell_command = ui.text_edit_singleline(&mut general.shell_command);
+                                resp.merge(open_shell_command);
+                                ui.end_row();
     
-                            ui.rtl_label(Align::Center, "Close After Open")
-                                .on_hover_text("Close the window after opening a project");
-                            let close_after_open = ui.checkbox(&mut general.close_after_open, "");
-                            resp.merge(close_after_open);
-                            ui.end_row();
-                
-                            ui.rtl_label(Align::Center, "Startup Projects Tab")
-                                .on_hover_text("The default projects tab.");
-                            // let before = general.default_projects_tab;
-                            let startup_projects_tab = ComboBox::new("start_projects_tab_combo", "")
-                                .selected_text(general.default_projects_tab.text())
-                                .show_ui(ui, |ui| {
-                                    let recent_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::RecentProjects, "Recent");
-                                    let rust_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::Project(ProjectType::Rust), "Rust");
-                                    let python_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::Project(ProjectType::Python), "Python");
-                                    let web_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::Project(ProjectType::Web), "Web");
-                                    recent_label.union(rust_label).union(python_label).union(web_label)
-                                }).inner;
-                            if let Some(slt_resp) = startup_projects_tab {
-                                resp.merge(slt_resp);
-                            }
-                            ui.end_row();
-    
-                            ui.rtl_label(Align::Center, "Editor Command")
-                                .on_hover_text(r#"The command that is executed to open a project path.\nUse `{path}` (without backticks) as a placeholder for the formatter.\nUse `{{` and `}}` to escape `{` and `}`.\nYou do not need to put quotes around `{path}`."#);
-                            let editor_command = ui.text_edit_singleline(&mut general.editor_command);
-                            resp.merge(editor_command);
-                            ui.end_row();
-    
-                            ui.rtl_label(Align::Center, "Open Shell Command")
-                                .on_hover_text("The command to open an external shell.\nUse `{path}` (without backticks) as a placeholder for the formatter.\nUse `{{` and `}}` to escape `{` and `}`.\nYou do not need to put quotes around `{path}`.");
-                            let open_shell_command = ui.text_edit_singleline(&mut general.shell_command);
-                            resp.merge(open_shell_command);
-                            ui.end_row();
+                                ui.rtl_label(Align::Center, "File Explorer Command")
+                                    .on_hover_text("The command that is executed to open the file explorer.\nUse `{path}` (without backticks) as a placeholder for the formatter.\nUse `{{` and `}}` to escape `{` and `}`.\nYou do not need to put quotes around `{path}`.");
+                                let file_explorer_command = ui.text_edit_singleline(&mut general.explorer_command);
+                                resp.merge(file_explorer_command);
+                                ui.end_row();
 
-                            ui.rtl_label(Align::Center, "File Explorer Command")
-                                .on_hover_text("The command that is executed to open the file explorer.\nUse `{path}` (without backticks) as a placeholder for the formatter.\nUse `{{` and `}}` to escape `{` and `}`.\nYou do not need to put quotes around `{path}`.");
-                            let file_explorer_command = ui.text_edit_singleline(&mut general.explorer_command);
-                            resp.merge(file_explorer_command);
-                            ui.end_row();
+                                ui.rtl_label(Align::Center, "Dummy")
+                                    .on_hover_text("This field is not used for anything. Set it to whatever you want.");
+                                let dummy_field = ui.text_edit_multiline(&mut general.dummy_string);
+                                resp.merge(dummy_field);
+                                ui.end_row();
 
-                            resp.finish()
-                        }).inner;
-                    // let p = ui.painter().with_clip_rect(avail);
-                    // let (rect, _) = ui.allocate_exact_size(vec2(50.0, 600.0), Sense::empty());
-                    // p.rect_filled(rect, CornerRadius::ZERO, Color32::LIGHT_RED);
-                    grid_resp
-                }).inner
+                                ui.rtl_label(Align::Center, "Dummy")
+                                    .on_hover_text("This field is not used for anything. Set it to whatever you want.");
+    
+                                resp.finish()
+                            }).inner;
+                        // let p = ui.painter().with_clip_rect(avail);
+                        // let (rect, _) = ui.allocate_exact_size(vec2(50.0, 600.0), Sense::empty());
+                        // p.rect_filled(rect, CornerRadius::ZERO, Color32::LIGHT_RED);
+                        grid_resp
+                    }).inner
+            }).inner
         }).inner
     }
 }
@@ -644,18 +669,9 @@ impl ProjectsGui {
                                 .num_columns(2)
                                 .striped(true)
                                 .show(ui, |ui| {
-                                    ui.rtl_label(Align::Center, "Mark changed")
-                                        .on_hover_text("Mark Changed");
-                                    let mut btn = ui.button("Mark Changed");
-                                    if btn.clicked() {
-                                        btn.mark_changed();
-                                    }
-                                    let mut resp_updater = ResponseUpdater::new(btn);
-                                    
-                                    ui.end_row();
         
-                                    ui.rtl_label(Align::Center, "Project Directories")
-                                        .on_hover_text("The directories that will be searched for sub-directories/files to add to the project browser.");
+                                    let mut resp_updater = ResponseUpdater::new(ui.rtl_label(Align::Center, "Project Directories")
+                                        .on_hover_text("The directories that will be searched for sub-directories/files to add to the project browser."));
                                     ui.vertical(|ui| {
                                         let _u = ScrollArea::new(Vec2b::new(false, true))
                                         .auto_shrink(Vec2b::new(false, true))

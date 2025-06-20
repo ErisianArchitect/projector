@@ -49,8 +49,8 @@ impl Trigger {
         !self.is_active()
     }
 
-    pub fn trigger_ref(&self) -> TriggerRef<'_> {
-        TriggerRef {
+    pub fn trigger_ref(&self) -> AtomicTrigger<'_> {
+        AtomicTrigger {
             trigger: &self.trigger
         }
     }
@@ -58,11 +58,11 @@ impl Trigger {
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy)]
-pub struct TriggerRef<'a> {
+pub struct AtomicTrigger<'a> {
     trigger: &'a AtomicBool,
 }
 
-impl<'a> TriggerRef<'a> {
+impl<'a> AtomicTrigger<'a> {
     #[inline]
     pub fn new(trigger: &'a AtomicBool) -> Self {
         Self { trigger }
@@ -142,7 +142,7 @@ mod tests {
             trigger.set(false);
             assert!(!trigger.is_active() && trigger.is_inactive());
 
-            fn take_trigger(trigger: TriggerRef<'_>) {
+            fn take_trigger(trigger: AtomicTrigger<'_>) {
                 assert!(!trigger.is_active() && trigger.is_inactive());
                 trigger.activate();
                 assert!(trigger.is_active() && !trigger.is_inactive());

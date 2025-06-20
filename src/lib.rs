@@ -10,3 +10,4 @@ pub mod projects;
 pub mod util;
 pub mod fp;
 pub mod project_wizard;
+pub mod charcons;

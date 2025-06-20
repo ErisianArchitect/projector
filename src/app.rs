@@ -1,5 +1,5 @@
 #![allow(unused)]
-use std::{collections::VecDeque, io::Write, os::windows::process::CommandExt, path::{
+use std::{any, collections::VecDeque, io::Write, ops::BitOrAssign, os::windows::process::CommandExt, path::{
     Path, PathBuf,
 }, process::{Command, CommandArgs}, time::{Duration, Instant}};
 use eframe::{
@@ -259,7 +259,7 @@ impl App for ProjectorApp {
                     let (gear_rect, gear_btn) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::click());
                     let gear_style = ui.style().visuals.widgets.style(&gear_btn);
                     // ui.painter().rect(gear_rect, CornerRadius::ZERO, gear_style.bg_fill, gear_style.bg_stroke, StrokeKind::Inside);
-                    ui.painter().text(gear_rect.center(), Align2::CENTER_CENTER, "⚙", FontId::monospace(24.0), gear_style.text_color());
+                    ui.painter().text(gear_rect.center(), Align2::CENTER_CENTER, crate::charcons::GEAR2, FontId::monospace(24.0), gear_style.text_color());
                     if gear_btn.clicked() {
                         self.dialog = ModalUi::settings(self.settings.clone());
                     }
@@ -350,7 +350,8 @@ impl App for ProjectorApp {
                                     let mut open_editor_toggle = self.runtime.recent_project_context.open_editor;
                                     let mut open_shell_toggle = self.runtime.recent_project_context.open_shell;
                                     let mut open_explorer_toggle = self.runtime.recent_project_context.open_explorer;
-                                    self.persist.recent_projects.iter().for_each(|proj| {
+                                    let mut remove_index = None;
+                                    self.persist.recent_projects.iter().enumerate().for_each(|(index, proj)| {
                                         let path = match proj {
                                             ProjectPath::Rust(path_buf) => path_buf.as_path(),
                                             ProjectPath::Python(path_buf) => path_buf.as_path(),
@@ -369,7 +370,22 @@ impl App for ProjectorApp {
                                         }
                                         recent_resp.context_menu(|ui| {
                                             set_style(ui.style_mut());
-                                            ui.label(format!("{}", path.display()));
+                                            if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+                                                ui.label(format!("{}", name));
+                                            } else {
+                                                ui.colored_label(Color32::RED, "<invalid>");
+                                            }
+
+                                            // ui.separator();
+
+                                            
+                                            if ui.button("Close Menu").clicked() {
+                                                ui.close_menu();
+                                            }
+
+                                            ui.separator();
+                                            
+                                            let mut exec_actions = false;
 
                                             let reveal_in_explorer = ui.add(
                                                 Button::new("Reveal in File Explorer")
@@ -380,8 +396,8 @@ impl App for ProjectorApp {
                                                 open_explorer_toggle.toggle();
                                             }
                                             if reveal_in_explorer.clicked() {
-                                                self.reveal_in_file_explorer(path);
-                                                ui.close_menu();
+                                                open_explorer_toggle = true;
+                                                exec_actions = true;
                                             }
                                             reveal_in_explorer.on_hover_text(&self.settings.general.explorer_command);
                                             
@@ -394,8 +410,8 @@ impl App for ProjectorApp {
                                                 open_shell_toggle.toggle();
                                             }
                                             if open_terminal_here.clicked() {
-                                                self.open_terminal_here(path);
-                                                ui.close_menu();
+                                                open_shell_toggle = true;
+                                                exec_actions = true;
                                             }
                                             open_terminal_here.on_hover_text(&self.settings.general.shell_command);
 
@@ -408,28 +424,34 @@ impl App for ProjectorApp {
                                                 open_editor_toggle.toggle();
                                             }
                                             if open_in_editor.clicked() {
-                                                self.open_in_editor(path);
-                                                ui.close_menu();
+                                                open_editor_toggle = true;
+                                                exec_actions = true;
                                             }
                                             open_in_editor.on_hover_text(&self.settings.general.editor_command);
 
-                                            let any_ticked = open_editor_toggle || open_shell_toggle || open_explorer_toggle;
-                                            if any_ticked {
-                                                if ui.button("Execute Multiple").clicked() {
-                                                    if open_editor_toggle {
-                                                        self.open_in_editor(path);
-                                                        open_editor_toggle = false;
-                                                    }
-                                                    if open_shell_toggle {
-                                                        self.open_terminal_here(path);
-                                                        open_shell_toggle = false;
-                                                    }
-                                                    if open_explorer_toggle {
-                                                        self.reveal_in_file_explorer(path);
-                                                        open_explorer_toggle = false;
-                                                    }
-                                                    ui.close_menu();
+                                            if exec_actions {
+                                                if open_editor_toggle {
+                                                    self.open_in_editor(path);
                                                 }
+                                                if open_explorer_toggle {
+                                                    self.reveal_in_file_explorer(path);
+                                                }
+                                                if open_shell_toggle {
+                                                    self.open_terminal_here(path);
+                                                }
+                                                ui.close_menu();
+                                            }
+                                            ui.separator();
+
+                                            if ui.button("Copy Path").clicked() {
+                                                ui.ctx().copy_text(format!("{}", path.display()));
+                                                ui.close_menu();
+                                            }
+                                            ui.separator();
+
+                                            if ui.clicked("Remove") {
+                                                remove_index.replace(index);
+                                                ui.close_menu();
                                             }
                                         });
                                         recent_resp.on_hover_ui(move |ui| {
@@ -437,6 +459,10 @@ impl App for ProjectorApp {
                                             ui.label(&path_str);
                                         });
                                     });
+                                    if let Some(index) = remove_index {
+                                        self.persist.recent_projects.remove(index);
+                                    }
+
                                     self.runtime.recent_project_context = RecentProjectContext {
                                         open_editor: open_editor_toggle,
                                         open_shell: open_shell_toggle,
@@ -447,6 +473,14 @@ impl App for ProjectorApp {
                         }
                         MainTab::Project(ProjectType::Rust) => {
                             ui.with_layout(Layout::top_down(Align::Center), |ui| {
+                                let text = if self.runtime.recent_project_context.open_editor {
+                                    crate::charcons::STAR_FILLED
+                                } else {
+                                    crate::charcons::STAR_STROKE
+                                };
+                                if ui.clicked(text) {
+                                    self.runtime.recent_project_context.open_editor.toggle();
+                                }
                                 Grid::new("rust_project_tab_grid")
                                 .num_columns(2)
                                 .min_col_width(250.0)
@@ -482,30 +516,35 @@ impl App for ProjectorApp {
                             });
                         }
                         MainTab::Project(ProjectType::Web) => {
-                            
+
                         }
                         MainTab::Text => {
                             ui.centered_and_justified(|ui| {
                                 Frame::NONE
                                     .inner_margin(Margin::same(8))
                                     .show(ui, |ui| {
-                                        ui.set_min_width(ui.available_width());
-                                        ui.set_max_width(ui.available_width());
+                                        ui.set_width(ui.available_width());
                                         ui.with_layout(Layout::bottom_up(Align::Center).with_cross_justify(true), |ui| {
                                             ui.button("Save");
-                                            ui.with_layout(Layout::centered_and_justified(Direction::TopDown), |ui| {
-                                                ScrollArea::both().show(ui, |ui| {
-                                                    TextEdit::multiline(&mut self.quick_edit_text)
-                                                        .font(FontId::monospace(16.0))
-                                                        // .frame(false)
-                                                        .desired_width(ui.available_width())
-                                                        .code_editor()
-                                                        .show(ui);
+                                            Frame::NONE
+                                            .stroke(Stroke::new(1.0, Color32::DARK_GRAY))
+                                            .show(ui, |ui| {
+                                                ui.with_layout(Layout::centered_and_justified(Direction::TopDown), |ui| {
+                                                    ScrollArea::both().show(ui, |ui| {
+                                                        TextEdit::multiline(&mut self.quick_edit_text)
+                                                            .font(FontId::monospace(16.0))
+                                                            // .frame(false)
+                                                            .desired_width(ui.available_width())
+                                                            .code_editor()
+                                                            .hint_text("Enter text here...")
+                                                            .lock_focus(true)
+                                                            .show(ui);
+                                                    });
                                                 });
                                             });
                                         });
-                                    }).inner
-                            }).inner
+                                    });
+                            });
                         }
                     }
                 });
