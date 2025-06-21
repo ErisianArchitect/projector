@@ -6,6 +6,7 @@ pub enum ExecError {
     IoError(#[from] std::io::Error),
 }
 
+// This isn't actually as useful as I was hoping since it opens a terminal, which isn't what is wanted.
 pub fn system<S: AsRef<str>>(command: S) -> i32 {
     fn inner(command: &str) -> i32 {
         let c_str = CString::new(command).expect("Failed to create CString.");
@@ -42,7 +43,7 @@ pub fn execute<S: AsRef<str>>(script: S) -> Result<ExitStatus, std::io::Error> {
             let script_path = temp.path();
             let path_str = script_path.display().to_string();
             let status = Command::new(&path_str)
-                .creation_flags(0x08000000) // prevent creation of window.
+                .creation_flags(0x08000000) // prevent creation of terminal window.
                 .status()?;
             // Prevents premature drop.
             drop(temp);

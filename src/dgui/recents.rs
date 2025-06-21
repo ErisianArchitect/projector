@@ -63,7 +63,26 @@ impl<'a> Recent<'a> {
     }
 }
 
+// Hmm. What do I need for this?
+// I need there to be a list that has all of the recents
+// Then I also need another list for the recents that are to be displayed (controlled by a filter/order)
+// I need the ordered list to know the index in the original list so that removals can happen
+// When updates (such as removals or refreshes) happen, the display list must be refreshed.
 /// Not to be confused with [Recent].
 pub struct Recents {
+    recents: Vec<ProjectPath>,
+    order: Vec<usize>,
+}
 
+impl Recents {
+    pub fn new(recents: Vec<ProjectPath>) -> Self {
+
+    }
+}
+
+pub struct RecentOrder {
+    rust: i32,
+    python: i32,
+    web: i32,
+    other: i32,
 }

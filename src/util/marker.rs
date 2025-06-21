@@ -35,6 +35,11 @@ impl<'a> MarkerRef<'a> {
     }
 
     #[inline]
+    pub fn mark_if(self, condition: bool) -> bool {
+        condition && self.mark()
+    }
+
+    #[inline]
     pub fn reset(self) -> bool {
         self.marker.swap(false, Ordering::Relaxed)
     }
@@ -72,6 +77,11 @@ impl Marker {
     }
 
     #[inline]
+    pub fn mark_if(&self, condition: bool) -> bool {
+        condition && self.mark()
+    }
+
+    #[inline]
     pub fn reset(&self) -> bool {
         self.marker.swap(false, Ordering::Relaxed)
     }
@@ -103,6 +113,11 @@ impl ArcMarker {
     #[inline]
     pub fn mark(&self) -> bool {
         !self.marker.swap(true, Ordering::Relaxed)
+    }
+
+    #[inline]
+    pub fn mark_if(&self, condition: bool) -> bool {
+        condition && self.mark()
     }
 
     #[inline]
@@ -156,6 +171,11 @@ impl<'a> MarkOnly<'a> {
     #[inline]
     pub fn mark(self) -> bool {
         self.marker.mark()
+    }
+
+    #[inline]
+    pub fn mark_if(self, condition: bool) -> bool {
+        self.marker.mark_if(condition)
     }
 
     #[inline]
