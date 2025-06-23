@@ -20,12 +20,115 @@ pub fn populate_entries<P: AsRef<Path>>(directory: P) -> std::io::Result<Vec<Pat
     Ok(entries)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, bincode::Decode, bincode::Encode)]
+pub enum ProjectType {
+    Rust,
+    Python,
+    Web,
+    Other,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, bincode::Decode, bincode::Encode)]
 pub enum ProjectPath {
     Rust(PathBuf),
     Python(PathBuf),
     Web(PathBuf),
     Other(PathBuf),
+}
+
+impl ProjectPath {
+    #[inline]
+    pub fn rust<P: Into<PathBuf>>(path: P) -> Self {
+        Self::Rust(path.into())
+    }
+
+    #[inline]
+    pub fn python<P: Into<PathBuf>>(path: P) -> Self {
+        Self::Python(path.into())
+    }
+
+    #[inline]
+    pub fn web<P: Into<PathBuf>>(path: P) -> Self {
+        Self::Web(path.into())
+    }
+
+    #[inline]
+    pub fn other<P: Into<PathBuf>>(path: P) -> Self {
+        Self::Other(path.into())
+    }
+
+    #[inline]
+    pub const fn project_type(&self) -> ProjectType {
+        match self {
+            ProjectPath::Rust(_) => ProjectType::Rust,
+            ProjectPath::Python(_) => ProjectType::Python,
+            ProjectPath::Web(_) => ProjectType::Web,
+            ProjectPath::Other(_) => ProjectType::Other,
+        }
+    }
+
+    #[inline]
+    pub fn path(&self) -> &Path {
+        match self {
+            ProjectPath::Rust(path_buf) => path_buf,
+            ProjectPath::Python(path_buf) => path_buf,
+            ProjectPath::Web(path_buf) => path_buf,
+            ProjectPath::Other(path_buf) => path_buf,
+        }
+    }
+
+    #[inline]
+    pub fn take_inner(self) -> PathBuf {
+        match self {
+            ProjectPath::Rust(path_buf) => path_buf,
+            ProjectPath::Python(path_buf) => path_buf,
+            ProjectPath::Web(path_buf) => path_buf,
+            ProjectPath::Other(path_buf) => path_buf,
+        }
+    }
+}
+
+impl AsRef<Path> for ProjectPath {
+    #[inline]
+    fn as_ref(&self) -> &Path {
+        match self {
+            ProjectPath::Rust(path_buf) => path_buf,
+            ProjectPath::Python(path_buf) => path_buf,
+            ProjectPath::Web(path_buf) => path_buf,
+            ProjectPath::Other(path_buf) => path_buf,
+        }
+    }
+}
+
+impl std::ops::Deref for ProjectPath {
+    type Target = Path;
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        match self {
+            ProjectPath::Rust(path_buf) => path_buf,
+            ProjectPath::Python(path_buf) => path_buf,
+            ProjectPath::Web(path_buf) => path_buf,
+            ProjectPath::Other(path_buf) => path_buf,
+        }
+    }
+}
+
+impl std::borrow::Borrow<Path> for ProjectPath {
+    #[inline]
+    fn borrow(&self) -> &Path {
+        self.as_ref()
+    }
+}
+
+impl Into<PathBuf> for ProjectPath {
+    fn into(self) -> PathBuf {
+        match self {
+            ProjectPath::Rust(path_buf) => path_buf,
+            ProjectPath::Python(path_buf) => path_buf,
+            ProjectPath::Web(path_buf) => path_buf,
+            ProjectPath::Other(path_buf) => path_buf,
+        }
+    }
 }
 
 #[derive(Debug, Clone, bincode::Decode, bincode::Encode)]
@@ -91,6 +194,16 @@ impl ProjectDirs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proj_path_test() {
+        fn print_path(path: &Path) {
+            println!("Path: {}", path.display());
+        }
+        let proj_path = ProjectPath::rust(r#"C:\Users\derek\Documents\code\rust\projector"#);
+        print_path(&proj_path);
+    }
+
     #[test]
     fn populate_directory() {
         let directory = rfd::FileDialog::new().pick_folder().expect("You didn't pick a folder, dumbass.");

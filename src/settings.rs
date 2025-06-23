@@ -5,10 +5,13 @@ use eframe::{
 
 use crate::{
     app::{
-        MainTab, ModalUi, ProjectType
+        MainTab, ModalUi,
     }, appdata::AppData, dgui::tabs::{Tab, TabSizeMode, Tabs}, ext::UiExt,
     util::{
         alt::Alternator, marker::*
+    },
+    projects::{
+        ProjectType,
     },
 };
 
@@ -550,42 +553,8 @@ impl GeneralGui {
             .inner_margin(Margin::same(8))
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
-                let mut alt = Alternator::new(ui.style().visuals.panel_fill, ui.style().visuals.faint_bg_color);
-                ui.setting_ui(
-                    LABEL_WIDTH,
-                    "Test Label",
-                    "This is a test.",
-                    alt.next(),
-                    |ui| {
-                        // _=ui.button("Test");
-                        // _=ui.button("Hello");
-                        let oac = ui.toggle_box(&mut general.open_after_create);
-                        record_change(&oac);
-                    }
-                );
-                ui.setting_ui(
-                    LABEL_WIDTH,
-                    "Click Counter",
-                    format!("This just counts how many times you've clicked the button. You've clicked it {} times.",general.clicker_counter),
-                    alt.next(),
-                    |ui| {
-                        let text = format!("{}", general.clicker_counter);
-                        if ui.clicked(text) {
-                            general.clicker_counter += 1;
-                            changed.mark();
-                        }
-                    }
-                );
-                ui.setting_ui(
-                    LABEL_WIDTH,
-                    "Dummy",
-                    "Dummy",
-                    alt.next(),
-                    |ui| {
-                        let dummy = ui.toggle_box(&mut general.dummy_toggle);
-                        record_change(&dummy);
-                    }
-                );
+                let mut alt = Alternator::new(Color32::TRANSPARENT, ui.style().visuals.faint_bg_color);
+                // alt.alternate();
                 ui.setting_ui(
                     LABEL_WIDTH,
                     "Open After Create",
@@ -621,6 +590,10 @@ impl GeneralGui {
                                 record_change(&python_label);
                                 let web_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::Project(ProjectType::Web), "Web");
                                 record_change(&web_label);
+                                let other_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::Project(ProjectType::Other), "Other");
+                                record_change(&other_label);
+                                let text_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::Text, "Text");
+                                record_change(&text_label);
                             }).response);
                     }
                 );
@@ -659,6 +632,19 @@ impl GeneralGui {
                 );
                 ui.setting_ui(
                     LABEL_WIDTH,
+                    "Click Counter",
+                    format!("This just counts how many times you've clicked the button. You've clicked it {} times.",general.clicker_counter),
+                    alt.next(),
+                    |ui| {
+                        let text = format!("{}", general.clicker_counter);
+                        if ui.clicked(text) {
+                            general.clicker_counter += 1;
+                            changed.mark();
+                        }
+                    }
+                );
+                ui.setting_ui(
+                    LABEL_WIDTH,
                     "Dummy Text",
                     "This field is not used for anything. It is for testing/entertainment purposes.",
                     alt.next(),
@@ -667,6 +653,16 @@ impl GeneralGui {
                             .desired_width(ui.available_width())
                             .desired_rows(8);
                         record_change(&ui.add(edit));
+                    }
+                );
+                ui.setting_ui(
+                    LABEL_WIDTH,
+                    "Dummy",
+                    "Dummy",
+                    alt.next(),
+                    |ui| {
+                        let dummy = ui.toggle_box(&mut general.dummy_toggle);
+                        record_change(&dummy);
                     }
                 );
             });
@@ -685,6 +681,7 @@ impl ProjectsGui {
             Tab::new("Rust", ProjectType::Rust),
             Tab::new("Python", ProjectType::Python),
             Tab::new("Web", ProjectType::Web),
+            Tab::new("Other", ProjectType::Other),
         ];
         Tabs::new(&mut self.tab_index, TABS)
             .with_text_align(Align::Center)
@@ -735,10 +732,9 @@ impl ProjectsGui {
                             });
                         });
                     }
-                    ProjectType::Python => {
-                    }
-                    ProjectType::Web => {
-                    }
+                    ProjectType::Python => {}
+                    ProjectType::Web => {}
+                    ProjectType::Other => {}
                 }
             });
     }

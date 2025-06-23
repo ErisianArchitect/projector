@@ -153,7 +153,7 @@ impl<'a, T: Copy> Tabs<'a, T> {
             }
             // color for selected/unselected tabs.
             let (unselected, fill_color) = if index == *tab_index_edit {
-                (false, ui.style().visuals.extreme_bg_color)
+                (false, ui.style().visuals.panel_fill)
             } else {
                 (true, style.bg_fill)
             };
@@ -187,13 +187,13 @@ impl<'a, T: Copy> Tabs<'a, T> {
         let result = ui.allocate_new_ui(
             UiBuilder::new()
                 .layout(Layout::top_down(Align::Min))
-                // .max_rect(avail_rect)
+                .max_rect(avail_rect)
                 .sizing_pass(),
             |ui| {
                 let spacing = ui.spacing().item_spacing;
                 ui.spacing_mut().item_spacing = Vec2::ZERO;
-                ui.set_min_width(max_width);
-                ui.set_max_width(max_width);
+                ui.set_min_size(avail_rect.size());
+                ui.set_max_size(avail_rect.size());
                 // let spacing = ui.spacing().item_spacing;
                 // ui.spacing_mut().item_spacing = Vec2::ZERO;
                 // ui.spacing_mut().window_margin = Margin::ZERO;
@@ -203,11 +203,12 @@ impl<'a, T: Copy> Tabs<'a, T> {
                         // ui.spacing_mut().item_spacing = spacing;
                         self.draw_titles(ui);
                         Frame::NONE
-                        .fill(ui.style().visuals.extreme_bg_color)
+                        .fill(ui.style().visuals.panel_fill)
                         .show(ui, |ui| {
                             ui.spacing_mut().item_spacing = spacing;
-                            ui.set_min_width(ui.available_width());
-                            ui.set_max_width(ui.available_width());
+                            let avail = ui.available_rect_before_wrap();
+                            ui.set_min_size(avail.size());
+                            ui.set_max_size(avail.size());
                             f(*self.tab_index, self.tabs[*self.tab_index].value, ui)
                         }).inner
                     }).inner

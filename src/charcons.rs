@@ -139,4 +139,5 @@ define!(
     COPYRIGHT = "©";
     RADIOACTIVE = "☢";
     BIOHAZARD = "☣";
+    ELIPSIS = "⋯";
 );

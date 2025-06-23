@@ -7,6 +7,7 @@ repository = "https://github.com/ErisianArchitect/projector"
 
 [dependencies]
 bincode = { version = "2.0.1", features = ["derive"] }
+chrono = "0.4.41"
 directories = "6.0.0"
 eframe = { version = "0.31.1", features = ["persistence"] }
 libc = "0.2.174"

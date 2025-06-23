@@ -2,7 +2,7 @@
 use eframe::{
     egui::*,
 };
-use crate::projects::ProjectPath;
+use crate::projects::{ProjectPath, ProjectType};
 
 
 /// Not to be confused with [Recents].
@@ -28,7 +28,7 @@ impl<'a> Recent<'a> {
 
         let left_rect = Rect::from_min_max(
             rect.min,
-            pos2(rect.right() - 160.0, rect.max.y),
+            pos2(rect.right() - 120.0, rect.max.y),
         );
         let right_rect = Rect::from_min_max(
             left_rect.right_top(),
@@ -71,18 +71,60 @@ impl<'a> Recent<'a> {
 /// Not to be confused with [Recent].
 pub struct Recents {
     recents: Vec<ProjectPath>,
-    order: Vec<usize>,
+    order: Vec<u16>,
 }
 
 impl Recents {
     pub fn new(recents: Vec<ProjectPath>) -> Self {
-
+        Self {
+            order: (0..recents.len()).map(|_| 0u16).collect(),
+            recents,
+        }
     }
 }
 
-pub struct RecentOrder {
-    rust: i32,
-    python: i32,
-    web: i32,
-    other: i32,
+/*
+group_by month {
+    order: [Rust, Python, Web, Other] {
+        group_by type {
+            order_by name {
+                group_by directory {
+                    order_by name {
+
+                    }
+                }
+            }
+        }
+    }
 }
+group_by type {
+    group_by month {
+
+    }
+}
+*/
+
+// I want to be able to order the Recents in various ways:
+// - Alphabetically Ascending/Descending
+// - Time, Most/Least Recently Opened
+// In addition to being able to order them, I also want to be able to group them:
+// - By Day/Month/Year
+// - Project Type (Rust, Python, Web, Other) (and order the project types as well)
+// - Parent Directory
+// 
+
+// pub struct RecentsOrder {
+//     rust: i8,
+//     python: i8,
+//     web: i8,
+//     other: i8,
+// }
+
+// impl RecentsOrder {
+//     pub const DEFAULT: RecentsOrder = RecentsOrder {
+//         rust: 0,
+//         python: 1,
+//         web: 2,
+//         other: 3,
+//     };
+// }

@@ -8,7 +8,7 @@ use eframe::{
 use crate::{appdata::AppData, dgui::recents::Recent, ext::{BoolExt, CloserBoolExt, UiExt}, project_wizard::ProjectWizard, projects::ProjectPath};
 use crate::settings::*;
 
-use crate::{settings::Settings, dgui::{self, tabs::{Tab, TabSizeMode, Tabs}}};
+use crate::{settings::Settings, dgui::{self, tabs::{Tab, TabSizeMode, Tabs}}, projects::ProjectType};
 
 pub fn set_style(style: &mut Style) {
     style.visuals.widgets.active.corner_radius = CornerRadius::ZERO;
@@ -18,13 +18,6 @@ pub fn set_style(style: &mut Style) {
     style.visuals.widgets.open.corner_radius = CornerRadius::ZERO;
     style.visuals.menu_corner_radius = CornerRadius::ZERO;
     style.visuals.window_corner_radius = CornerRadius::ZERO;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, bincode::Encode, bincode::Decode)]
-pub enum ProjectType {
-    Rust,
-    Python,
-    Web,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, bincode::Encode, bincode::Decode)]
@@ -47,6 +40,7 @@ impl MainTab {
             MainTab::Project(ProjectType::Rust) => "Rust",
             MainTab::Project(ProjectType::Python) => "Python",
             MainTab::Project(ProjectType::Web) => "Web",
+            MainTab::Project(ProjectType::Other) => "Other",
             MainTab::Text => "Text",
         }
     }
@@ -172,8 +166,9 @@ impl ProjectorApp {
                     ProjectType::Rust => 1,
                     ProjectType::Python => 2,
                     ProjectType::Web => 3,
+                    ProjectType::Other => 4,
                 },
-                MainTab::Text => 4,
+                MainTab::Text => 5,
             },
             language_tab: settings.general.default_projects_tab,
             settings,
@@ -274,8 +269,55 @@ impl App for ProjectorApp {
                         ctx.send_viewport_cmd(ViewportCommand::Close);
                     }
                     if ui.button("Create Project").clicked() {
-                        println!("Create Project Clicked.");
+                        self.dialog = ModalUi::ProjectWizard(ProjectWizard {
+
+                        });
                     }
+                    ui.menu_button("Menu", |ui| {
+                        if ui.clicked("Restart") {
+                            self.save_internal();
+                            ctx.send_viewport_cmd(ViewportCommand::Close);
+                            let curr_exe = std::env::current_exe().expect("Failed to get current exe.");
+                            std::process::Command::new(curr_exe).spawn().expect("Failed to spawn process.");
+                        }
+                        if ui.clicked("Exit") {
+                            ctx.send_viewport_cmd(ViewportCommand::Close);
+                        }
+                        ui.separator();
+                        if ui.clicked("Settings") {
+                            self.dialog = ModalUi::settings(self.settings.clone());
+                        }
+                    });
+                    let menu_id = Id::new("menu_bar_popup_menu");
+                    let menu_btn = ui.button("Open Menu");
+                    if menu_btn.clicked() {
+                        ui.memory_mut(|mem| mem.toggle_popup(menu_id));
+                    }
+                    popup::popup_above_or_below_widget(
+                        ui,
+                        menu_id,
+                        &menu_btn,
+                        AboveOrBelow::Above,
+                        PopupCloseBehavior::CloseOnClickOutside,
+                        |ui| {
+                            if ui.button("Restart").clicked() {
+                                self.save_internal();
+                                ctx.send_viewport_cmd(ViewportCommand::Close);
+                                let curr_exe = std::env::current_exe().expect("Failed to get current exe.");
+                                std::process::Command::new(curr_exe).spawn().expect("Failed to spawn process.");
+                                ui.memory_mut(|mem| mem.close_popup());
+                            }
+                            if ui.button("Exit").clicked() {
+                                ctx.send_viewport_cmd(ViewportCommand::Close);
+                                ui.memory_mut(|mem| mem.close_popup());
+                            }
+                            ui.separator();
+                            if ui.button("Settings").clicked() {
+                                self.dialog = ModalUi::settings(self.settings.clone());
+                                ui.memory_mut(|mem| mem.close_popup());
+                            }
+                        }
+                    );
                 });
             });
         CentralPanel::default().frame(Frame::new().inner_margin(0.0)).show(ctx, |ui| {
@@ -310,6 +352,7 @@ impl App for ProjectorApp {
                 Tab::new("Rust", MainTab::Project(ProjectType::Rust)),
                 Tab::new("Python", MainTab::Project(ProjectType::Python)),
                 Tab::new("Web", MainTab::Project(ProjectType::Web)),
+                Tab::new("Other", MainTab::Project(ProjectType::Other)),
                 Tab::new("Text", MainTab::Text),
             ];
             // menu::bar(ui, |ui| {
@@ -516,7 +559,10 @@ impl App for ProjectorApp {
                             });
                         }
                         MainTab::Project(ProjectType::Web) => {
-
+                            ui.label("Unfinished.");
+                        }
+                        MainTab::Project(ProjectType::Other) => {
+                            ui.label("Unfinished.");
                         }
                         MainTab::Text => {
                             ui.centered_and_justified(|ui| {
