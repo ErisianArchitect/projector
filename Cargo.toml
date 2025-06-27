@@ -10,6 +10,7 @@ bincode = { version = "2.0.1", features = ["derive"] }
 chrono = { version = "0.4.41", features = ["serde"] }
 directories = "6.0.0"
 eframe = { version = "0.31.1", features = ["persistence"] }
+globset = "0.4.16"
 libc = "0.2.174"
 notify = "8.0.0"
 rfd = "0.15.3"

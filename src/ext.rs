@@ -301,3 +301,21 @@ impl<T: Sized> ReplaceWith for T {
         }
     }
 }
+
+pub trait InstantExt {
+    fn start() -> Self;
+    fn reset(&mut self) -> std::time::Duration;
+}
+
+impl InstantExt for std::time::Instant {
+    #[inline]
+    fn start() -> Self {
+        Self::now()
+    }
+
+    #[inline]
+    fn reset(&mut self) -> std::time::Duration {
+        self.replace(Self::now())
+            .elapsed()
+    }
+}

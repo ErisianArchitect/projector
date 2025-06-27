@@ -6,13 +6,9 @@ use eframe::{
 use crate::{
     app::{
         MainTab, ModalUi,
-    }, appdata::AppData, dgui::tabs::{Tab, TabSizeMode, Tabs}, ext::UiExt,
-    util::{
+    }, appdata::AppData, dgui::tabs::{Tab, TabSizeMode, Tabs}, ext::{Replace, UiExt}, projects::ProjectType, util::{
         alt::Alternator, marker::*
-    },
-    projects::{
-        ProjectType,
-    },
+    }
 };
 
 #[repr(u8)]
@@ -314,6 +310,7 @@ pub struct SettingsDialog {
     pub general_gui: GeneralGui,
     pub projects_gui: ProjectsGui,
     pub style_gui: StyleGui,
+    pub counter: u64,
 }
 
 pub struct SettingsDialogResponse {
@@ -324,6 +321,7 @@ pub struct SettingsDialogResponse {
 impl SettingsDialog {
     pub fn from_settings(settings: Settings) -> Self {
         Self {
+            counter: 0,
             settings_copy: settings,
             settings_tab_index: 0,
             edit_state: EditState::Unaltered,
@@ -343,6 +341,7 @@ impl SettingsDialog {
 
     pub fn from_settings_tab(settings: Settings, tab: SettingsTab) -> Self {
         Self {
+            counter: 0,
             settings_copy: settings,
             settings_tab_index: tab.tab_index(),
             edit_state: EditState::Unaltered,
@@ -480,7 +479,9 @@ impl SettingsDialog {
                         // ui.painter().rect_filled(inner_rect, CornerRadius::ZERO, Color32::LIGHT_GRAY);
                         menu::bar(ui, |ui| {
                             ui.right_to_left(Align::Center, |ui| {
-                                let test_label = Label::new("???").selectable(false);
+                                self.counter += 1;
+                                let counter = self.counter;
+                                let test_label = Label::new(format!("{counter}")).selectable(false);
                                 ui.add(test_label);
                                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                                     let esc_pressed = ui.input_mut(|i| {

@@ -5,7 +5,7 @@ use std::{any, collections::VecDeque, io::Write, ops::BitOrAssign, os::windows::
 use eframe::{
     egui::{self, Style, *}, epaint::tessellator::path, App, CreationContext
 };
-use crate::{appdata::AppData, dgui::recents::Recent, ext::{BoolExt, CloserBoolExt, UiExt}, project_wizard::ProjectWizard, projects::ProjectPath, util::marker::Marker};
+use crate::{appdata::AppData, dgui::recents::Recent, ext::{BoolExt, CloserBoolExt, Replace, UiExt}, project_wizard::ProjectWizard, projects::ProjectPath, util::marker::Marker};
 use crate::settings::*;
 
 use crate::{settings::Settings, dgui::{self, tabs::{Tab, TabSizeMode, Tabs}}, projects::ProjectType};
@@ -366,6 +366,7 @@ impl App for ProjectorApp {
                                     ui.pin_btn(ui.spacing().interact_size.y, Color32::WHITE);
                                 });
                             });
+                            let spacing = ui.spacing_mut().item_spacing.replace(vec2(0.0, 0.0));
                             let recents_search = Frame::NONE
                                 .inner_margin(Margin { top: 0, left: 16, right: 16, bottom: 0 })
                                 .show(ui, |ui| {
@@ -378,136 +379,140 @@ impl App for ProjectorApp {
                                             .show(ui)
                                     }).inner;
                                 });
-                            ScrollArea::new(Vec2b::new(false, true))
-                            .auto_shrink(Vec2b::FALSE)
-                            .show(ui, |ui| {
-                                ui.with_inner_margin(Margin::symmetric(16, 8), |ui| {
-                                    ui.spacing_mut().item_spacing = Vec2::ZERO;
-                                    let mut open_editor_toggle = self.runtime.recent_project_context.open_editor;
-                                    let mut open_shell_toggle = self.runtime.recent_project_context.open_shell;
-                                    let mut open_explorer_toggle = self.runtime.recent_project_context.open_explorer;
-                                    let mut remove_index = None;
-                                    self.persist.recent_projects.iter().enumerate().for_each(|(index, proj)| {
-                                        let path = match proj {
-                                            ProjectPath::Rust(path_buf) => path_buf.as_path(),
-                                            ProjectPath::Python(path_buf) => path_buf.as_path(),
-                                            ProjectPath::Web(path_buf) => path_buf.as_path(),
-                                            ProjectPath::Other(path_buf) => path_buf.as_path(),
-                                        };
-                                        let recent = Recent::new(proj);
-                                        let recent_resp = recent.ui(ui);
-                                        if recent_resp.clicked() {
-                                            self.open_in_editor(path);
-                                        }
-                                        if recent_resp.clicked_by(PointerButton::Secondary) {
-                                            open_editor_toggle = false;
-                                            open_shell_toggle = false;
-                                            open_explorer_toggle = false;
-                                        }
-                                        recent_resp.context_menu(|ui| {
-                                            ui.horizontal(|ui| {
-                                                let close_resp = ui.button("❎");
-                                                if close_resp.clicked() {
+                            ui.with_inner_margin(Margin { top: 0, bottom: 8, left: 0, right: 0 }, |ui| {
+                                ScrollArea::new(Vec2b::new(false, true))
+                                .auto_shrink(Vec2b::FALSE)
+                                .show(ui, |ui| {
+                                    ui.spacing_mut().item_spacing = spacing;
+                                    ui.with_inner_margin(Margin { top: 0, bottom: 0, left: 16, right: 16 }, |ui| {
+                                        ui.spacing_mut().item_spacing = Vec2::ZERO;
+                                        let mut open_editor_toggle = self.runtime.recent_project_context.open_editor;
+                                        let mut open_shell_toggle = self.runtime.recent_project_context.open_shell;
+                                        let mut open_explorer_toggle = self.runtime.recent_project_context.open_explorer;
+                                        let mut remove_index = None;
+                                        self.persist.recent_projects.iter().enumerate().for_each(|(index, proj)| {
+                                            let path = match proj {
+                                                ProjectPath::Rust(path_buf) => path_buf.as_path(),
+                                                ProjectPath::Python(path_buf) => path_buf.as_path(),
+                                                ProjectPath::Web(path_buf) => path_buf.as_path(),
+                                                ProjectPath::Other(path_buf) => path_buf.as_path(),
+                                            };
+                                            let recent = Recent::new(proj);
+                                            let recent_resp = recent.ui(ui);
+                                            if recent_resp.clicked() {
+                                                self.open_in_editor(path);
+                                            }
+                                            if recent_resp.clicked_by(PointerButton::Secondary) {
+                                                open_editor_toggle = false;
+                                                open_shell_toggle = false;
+                                                open_explorer_toggle = false;
+                                            }
+                                            recent_resp.context_menu(|ui| {
+                                                ui.horizontal(|ui| {
+                                                    let close_resp = ui.button("❎");
+                                                    if close_resp.clicked() {
+                                                        ui.close_menu();
+                                                    }
+                                                    close_resp.on_hover_text("Close Menu");
+                                                    if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+                                                        ui.add(Label::new(format!("{}", name))
+                                                            .halign(Align::Center).selectable(false));
+                                                    } else {
+                                                        ui.colored_label(Color32::RED, "<invalid>");
+                                                    }
+                                                });
+    
+                                                ui.separator();
+                                                
+                                                let mut exec_actions = false;
+    
+                                                let reveal_in_explorer = ui.add(
+                                                    Button::new("🗀 Reveal in File Explorer")
+                                                        .corner_radius(CornerRadius::ZERO)
+                                                        .selected(open_explorer_toggle)
+                                                );
+                                                if reveal_in_explorer.secondary_clicked() {
+                                                    open_explorer_toggle.toggle();
+                                                } else if reveal_in_explorer.clicked() {
+                                                    open_explorer_toggle = true;
+                                                    exec_actions = true;
+                                                }
+                                                reveal_in_explorer.on_hover_text(&self.settings.general.explorer_command);
+                                                
+                                                let open_terminal_here = ui.add(
+                                                    Button::new("🗖 Open Terminal Here")
+                                                        .corner_radius(CornerRadius::ZERO)
+                                                        .selected(open_shell_toggle)
+                                                );
+                                                if open_terminal_here.secondary_clicked() {
+                                                    open_shell_toggle.toggle();
+                                                } else if open_terminal_here.clicked() {
+                                                    open_shell_toggle = true;
+                                                    exec_actions = true;
+                                                }
+                                                open_terminal_here.on_hover_text(&self.settings.general.shell_command);
+    
+                                                let open_in_editor = ui.add(
+                                                    Button::new("✏ Open in Editor")
+                                                        .corner_radius(CornerRadius::ZERO)
+                                                        .selected(open_editor_toggle)
+                                                );
+                                                if open_in_editor.secondary_clicked() {
+                                                    open_editor_toggle.toggle();
+                                                }else if open_in_editor.clicked() {
+                                                    open_editor_toggle = true;
+                                                    exec_actions = true;
+                                                }
+                                                open_in_editor.on_hover_text(&self.settings.general.editor_command);
+                                                
+                                                if exec_actions {
+                                                    if open_editor_toggle {
+                                                        self.open_in_editor(path);
+                                                    }
+                                                    if open_explorer_toggle {
+                                                        self.reveal_in_file_explorer(path);
+                                                    }
+                                                    if open_shell_toggle {
+                                                        self.open_terminal_here(path);
+                                                    }
                                                     ui.close_menu();
                                                 }
-                                                close_resp.on_hover_text("Close Menu");
-                                                if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-                                                    ui.add(Label::new(format!("{}", name))
-                                                        .halign(Align::Center).selectable(false));
-                                                } else {
-                                                    ui.colored_label(Color32::RED, "<invalid>");
+                                                ui.separator();
+    
+                                                if ui.button("🗐 Copy Path").clicked() {
+                                                    ui.ctx().copy_text(format!("{}", path.display()));
+                                                    ui.close_menu();
+                                                }
+                                                ui.separator();
+    
+                                                if ui.clicked("🗑 Remove") {
+                                                    remove_index.replace(index);
+                                                    ui.close_menu();
                                                 }
                                             });
-
-                                            ui.separator();
-                                            
-                                            let mut exec_actions = false;
-
-                                            let reveal_in_explorer = ui.add(
-                                                Button::new("🗀 Reveal in File Explorer")
-                                                    .corner_radius(CornerRadius::ZERO)
-                                                    .selected(open_explorer_toggle)
-                                            );
-                                            if reveal_in_explorer.secondary_clicked() {
-                                                open_explorer_toggle.toggle();
-                                            } else if reveal_in_explorer.clicked() {
-                                                open_explorer_toggle = true;
-                                                exec_actions = true;
-                                            }
-                                            reveal_in_explorer.on_hover_text(&self.settings.general.explorer_command);
-                                            
-                                            let open_terminal_here = ui.add(
-                                                Button::new("🗖 Open Terminal Here")
-                                                    .corner_radius(CornerRadius::ZERO)
-                                                    .selected(open_shell_toggle)
-                                            );
-                                            if open_terminal_here.secondary_clicked() {
-                                                open_shell_toggle.toggle();
-                                            } else if open_terminal_here.clicked() {
-                                                open_shell_toggle = true;
-                                                exec_actions = true;
-                                            }
-                                            open_terminal_here.on_hover_text(&self.settings.general.shell_command);
-
-                                            let open_in_editor = ui.add(
-                                                Button::new("✏ Open in Editor")
-                                                    .corner_radius(CornerRadius::ZERO)
-                                                    .selected(open_editor_toggle)
-                                            );
-                                            if open_in_editor.secondary_clicked() {
-                                                open_editor_toggle.toggle();
-                                            }else if open_in_editor.clicked() {
-                                                open_editor_toggle = true;
-                                                exec_actions = true;
-                                            }
-                                            open_in_editor.on_hover_text(&self.settings.general.editor_command);
-                                            
-                                            if exec_actions {
-                                                if open_editor_toggle {
-                                                    self.open_in_editor(path);
-                                                }
-                                                if open_explorer_toggle {
-                                                    self.reveal_in_file_explorer(path);
-                                                }
-                                                if open_shell_toggle {
-                                                    self.open_terminal_here(path);
-                                                }
-                                                ui.close_menu();
-                                            }
-                                            ui.separator();
-
-                                            if ui.button("🗐 Copy Path").clicked() {
-                                                ui.ctx().copy_text(format!("{}", path.display()));
-                                                ui.close_menu();
-                                            }
-                                            ui.separator();
-
-                                            if ui.clicked("🗑 Remove") {
-                                                remove_index.replace(index);
-                                                ui.close_menu();
-                                            }
+                                            recent_resp.on_hover_ui(move |ui| {
+                                                let path_str = format!("{}", path.display());
+                                                ui.label(&path_str);
+                                            });
                                         });
-                                        recent_resp.on_hover_ui(move |ui| {
-                                            let path_str = format!("{}", path.display());
-                                            ui.label(&path_str);
-                                        });
+                                        if let Some(index) = remove_index {
+                                            self.persist.recent_projects.remove(index);
+                                        }
+    
+                                        self.runtime.recent_project_context = RecentProjectContext {
+                                            open_editor: open_editor_toggle,
+                                            open_shell: open_shell_toggle,
+                                            open_explorer: open_explorer_toggle,
+                                        };
                                     });
-                                    if let Some(index) = remove_index {
-                                        self.persist.recent_projects.remove(index);
-                                    }
-
-                                    self.runtime.recent_project_context = RecentProjectContext {
-                                        open_editor: open_editor_toggle,
-                                        open_shell: open_shell_toggle,
-                                        open_explorer: open_explorer_toggle,
-                                    };
+                                    // Frame::NONE
+                                    // .inner_margin(Margin::symmetric(16, 0))
+                                    // .show(ui, |ui| {
+    
+                                    // });
                                 });
-                                // Frame::NONE
-                                // .inner_margin(Margin::symmetric(16, 0))
-                                // .show(ui, |ui| {
-
-                                // });
                             });
+                            // end scroll area
                         }
                         MainTab::Project(ProjectType::Rust) => {
                             ui.with_inner_margin(Margin::same(16), |ui| {
