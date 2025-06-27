@@ -359,6 +359,10 @@ impl SettingsDialog {
         }
     }
 
+    pub fn request_close(&mut self) {
+        self.request_close = true;
+    }
+
     pub fn show(
         &mut self,
         closer: Closer<'_>,
@@ -395,201 +399,183 @@ impl SettingsDialog {
             )
             .frame(
                 Frame::NONE
-                    .fill(Color32::ORANGE)
+                    .fill(ui.style().visuals.window_fill)
                     // .stroke(Stroke::new(1.0, Color32::GRAY))
             )
             .show(ui.ctx(), |ui| {
                 // settings dialog size
                 const SETTINGS_DIALOG_SIZE: Vec2 = Vec2::new(700.0, 700.0);
-                ui.set_min_size(SETTINGS_DIALOG_SIZE);
-                ui.set_max_size(SETTINGS_DIALOG_SIZE);
-                const TABS: &[Tab<'static, SettingsTab>] = &[
-                    Tab::new("General", SettingsTab::General),
-                    Tab::new("Projects", SettingsTab::Projects),
-                    Tab::new("Licenses", SettingsTab::Licenses),
-                    Tab::new("Templates", SettingsTab::Templates),
-                    Tab::new("Style", SettingsTab::Style),
-                    // Tab::new("Other", SettingsTab::Extended("other")),
-                    // Tab::new("End", SettingsTab::Extended("end")),
-                ];
-                Tabs::new(&mut self.settings_tab_index, TABS)
-                    .with_text_align(Align::Center)
-                    .with_size_mode(TabSizeMode::Grow)
-                    .show(ui, |_index, tab, ui| {
-                        // crate::app::set_style(ui.style_mut());
-                        // ui.with_layout(Layout::centered_and_justified(Direction::TopDown), |ui| {
-                        // ui.set_min_height(300.0);
-                        // ui.set_min_size(ui.max_rect().size());
-                        // let (avail, _) = ui.allocate_exact_size(vec2(750.0, 460.0), Sense::empty());
-                        let avail = ui.available_rect_before_wrap();
+                ui.set_size(SETTINGS_DIALOG_SIZE);
+                let bottom_left = ui.available_rect_before_wrap().left_bottom();
+                if self.request_close {
+                    if self.edit_state.needs_update() {
+                        let frame = Frame::NONE.fill(ui.style().visuals.panel_fill).corner_radius(CornerRadius::ZERO);
+                        // let padding = frame.inner_margin.sum().y + frame.outer_margin.sum().y;
+                        let int_size = ui.style().spacing.interact_size;
+                        Modal::new(Id::new("request_close_modal"))
+                            .area(Area::new(Id::new("request_close_modal_area"))
+                                // .anchor(Align2::LEFT_TOP, win_pos - vec2(0.0, 60.0))
+                                .fixed_pos(bottom_left)
+                                .pivot(Align2::LEFT_BOTTOM)
+                            ).frame(frame)
+                            .show(ui.ctx(), |ui| {
+                                // crate::app::set_style(ui.style_mut());
+                                ui.set_size(vec2(240.0, 60.0));
+                                let avail = ui.available_rect_before_wrap();
+                                let msg_rect = Rect::from_min_max(
+                                    avail.min,
+                                    pos2(avail.max.x, avail.max.y - (int_size.y + 8.0)),
+                                );
+                                let btns_rect = Rect::from_min_max(
+                                    msg_rect.left_bottom(),
+                                    avail.max,
+                                );
 
-                        let center_rect = Rect::from_min_max(
-                            avail.min,
-                            avail.right_bottom() - vec2(0.0, 24.0),
-                        );
+                                let btn_width = btns_rect.width() / 3.0;
 
-                        let bottom_rect = Rect::from_min_max(
-                            center_rect.left_bottom(),
-                            avail.right_bottom(),
-                        );
+                                let save_rect = Rect::from_min_max(
+                                    btns_rect.min,
+                                    pos2(btns_rect.min.x + btn_width, btns_rect.max.y),
+                                );
 
-                        ui.allocate_new_ui(UiBuilder::new().max_rect(center_rect), |ui| {
-                            match tab {
-                                SettingsTab::General => {
-                                    self.general_gui.ui(changed, &mut self.settings_copy.general, ui);
+                                let discard_rect = Rect::from_min_max(
+                                    save_rect.right_top(),
+                                    pos2(save_rect.max.x + btn_width, btns_rect.max.y),
+                                );
+
+                                let cancel_rect = Rect::from_min_max(
+                                    discard_rect.right_top(),
+                                    btns_rect.max,
+                                );
+
+                                let save_btn = ui.put(save_rect.shrink(4.0), Button::new("Save"));
+                                let discard_btn = ui.put(discard_rect.shrink(4.0), Button::new("Discard"));
+                                let cancel_btn = ui.put(cancel_rect.shrink(4.0), Button::new("Cancel"));
+
+                                if save_btn.clicked() {
+                                    if let Ok(_) = apply_settings(original_settings, &self.settings_copy, app_data) {
+                                        self.edit_state = EditState::Synced;
+                                    } else {
+                                        eprintln!("Failed to save settings.");
+                                    }
                                 }
-                                SettingsTab::Projects => {
-                                    self.projects_gui.ui(changed, &mut self.settings_copy.projects, ui);
+                                if discard_btn.clicked() {
+                                    closer.close();
                                 }
-                                SettingsTab::Licenses => {}
-                                SettingsTab::Templates => {}
-                                SettingsTab::Style => {
-                                    Frame::NONE
-                                        .inner_margin(Margin::same(8))
-                                        .show(ui, |ui| {
-                                            self.style_gui.ui(changed, &mut self.settings_copy.style, ui)
-                                        });
+                                if cancel_btn.clicked() {
+                                    self.request_close = false;
                                 }
-                            }
-                            // let final_resp = ui.with_layout(Layout::default(), |ui| {
-                            //     // let resp = ui.allocate_response(Vec2::ZERO, Sense::empty());
-                            // }).inner;
-                            // final_resp
-                        });
-                        
-                        let bottom_shrink = bottom_rect.shrink(4.0);
-                        ui.allocate_new_ui(UiBuilder::new().max_rect(bottom_shrink), |ui| {
-                            ui.horizontal(|ui| {
-                                let win_pos = bottom_rect.left_bottom();
-                                let close = ui.button("Close");
-                                let esc_pressed = ui.input_mut(|i| {
-                                    i.consume_key(Modifiers::NONE, Key::Escape)
-                                });
-                                if esc_pressed || close.clicked() {
-                                    self.request_close = true;
-                                }
-                                if self.request_close {
-                                    if self.edit_state.needs_update() {
-                                        let frame = Frame::NONE.fill(ui.style().visuals.panel_fill).corner_radius(CornerRadius::ZERO);
-                                        // let padding = frame.inner_margin.sum().y + frame.outer_margin.sum().y;
-                                        let int_size = ui.style().spacing.interact_size;
-                                        Modal::new(Id::new("request_close_modal"))
-                                            .area(Area::new(Id::new("request_close_modal_area"))
-                                                // .anchor(Align2::LEFT_TOP, win_pos - vec2(0.0, 60.0))
-                                                .fixed_pos(win_pos)
-                                                .pivot(Align2::LEFT_BOTTOM)
-                                            ).frame(frame)
-                                            .show(ui.ctx(), |ui| {
-                                                // crate::app::set_style(ui.style_mut());
-                                                ui.set_min_size(vec2(240.0, 60.0));
-                                                ui.set_max_size(vec2(240.0, 60.0));
-                                                let avail = ui.available_rect_before_wrap();
-                                                let msg_rect = Rect::from_min_max(
-                                                    avail.min,
-                                                    pos2(avail.max.x, avail.max.y - (int_size.y + 8.0)),
-                                                );
-                                                let btns_rect = Rect::from_min_max(
-                                                    msg_rect.left_bottom(),
-                                                    avail.max,
-                                                );
 
-                                                let btn_width = btns_rect.width() / 3.0;
-
-                                                let save_rect = Rect::from_min_max(
-                                                    btns_rect.min,
-                                                    pos2(btns_rect.min.x + btn_width, btns_rect.max.y),
-                                                );
-
-                                                let discard_rect = Rect::from_min_max(
-                                                    save_rect.right_top(),
-                                                    pos2(save_rect.max.x + btn_width, btns_rect.max.y),
-                                                );
-
-                                                let cancel_rect = Rect::from_min_max(
-                                                    discard_rect.right_top(),
-                                                    btns_rect.max,
-                                                );
-
-                                                let save_btn = ui.put(save_rect.shrink(4.0), Button::new("Save"));
-                                                let discard_btn = ui.put(discard_rect.shrink(4.0), Button::new("Discard"));
-                                                let cancel_btn = ui.put(cancel_rect.shrink(4.0), Button::new("Cancel"));
-
-                                                if save_btn.clicked() {
+                                let p = ui.painter_at(msg_rect);
+                                p.text(msg_rect.center(), Align2::CENTER_CENTER, "Settings have been modified.", FontId::proportional(16.0), ui.style().visuals.widgets.active.text_color());
+                            });
+                    } else {
+                        closer.close();
+                    }
+                }
+                ui.bottom_up(Align::Min, |ui| {
+                    // Do bottom bar first.
+                    ui.with_inner_margin(Margin::same(8), |ui| {
+                        // let inner_rect = ui.response().rect + Margin::same(8);
+                        // ui.painter().rect_filled(inner_rect, CornerRadius::ZERO, Color32::LIGHT_GRAY);
+                        menu::bar(ui, |ui| {
+                            ui.right_to_left(Align::Center, |ui| {
+                                let test_label = Label::new("???").selectable(false);
+                                ui.add(test_label);
+                                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                    let esc_pressed = ui.input_mut(|i| {
+                                        i.consume_key(Modifiers::NONE, Key::Escape)
+                                    });
+                                    let close_btn = ui.button("Close");
+                                    if esc_pressed || close_btn.clicked() {
+                                        if self.edit_state.needs_update() {
+                                            self.request_close = true;
+                                        } else {
+                                            closer.close();
+                                        }
+                                    }
+                                    match self.edit_state {
+                                        EditState::Modified => {
+                                            if ui.button("Save").clicked() {
+                                                if self.edit_state.needs_update() {
                                                     if let Ok(_) = apply_settings(original_settings, &self.settings_copy, app_data) {
                                                         self.edit_state = EditState::Synced;
                                                     } else {
                                                         eprintln!("Failed to save settings.");
                                                     }
                                                 }
-                                                if discard_btn.clicked() {
-                                                    closer.close();
-                                                }
-                                                if cancel_btn.clicked() {
-                                                    self.request_close = false;
-                                                }
-
-                                                let p = ui.painter_at(msg_rect);
-                                                p.text(msg_rect.center(), Align2::CENTER_CENTER, "Settings have been modified.", FontId::proportional(16.0), ui.style().visuals.widgets.active.text_color());
-                                            });
-                                    } else {
-                                        closer.close();
-                                    }
-                                }
-                                // let defaults = ui.button("Defaults");
-                                // if defaults.clicked() {
-                                //     self.settings_copy.apply_settings(&Settings::default());
-                                //     self.edit_state = EditState::Modified;
-                                // }
-                                if self.edit_state.needs_update() {
-                                    let save_btn = ui.button("Save");
-                                    if save_btn.clicked() {
-                                        if self.edit_state.needs_update() {
-                                            if let Ok(_) = apply_settings(original_settings, &self.settings_copy, app_data) {
-                                                self.edit_state = EditState::Synced;
-                                            } else {
-                                                eprintln!("Failed to save settings.");
                                             }
-                                        }
-                                    }
-
-                                    let save_and_close_btn = ui.button("Save and Close");
-                                    if save_and_close_btn.clicked() {
-                                        if self.edit_state.needs_update() {
-                                            if let Ok(_) = apply_settings(original_settings, &self.settings_copy, app_data) {
-                                                self.edit_state = EditState::Synced;
-                                                self.request_close = true;
-                                            } else {
-                                                eprintln!("Failed to save settings.");
+                                            if ui.button("Save and Close").clicked() {
+                                                if self.edit_state.needs_update() {
+                                                    if let Ok(_) = apply_settings(original_settings, &self.settings_copy, app_data) {
+                                                        self.edit_state = EditState::Synced;
+                                                        self.request_close = true;
+                                                    } else {
+                                                        eprintln!("Failed to save settings.");
+                                                    }
+                                                }
                                             }
-                                        }
+                                            if ui.button("Discard Changes").clicked() {
+                                                if self.edit_state.needs_update() {
+                                                    self.settings_copy.apply_settings(&original_settings);
+                                                }
+                                                self.edit_state = EditState::Unaltered;
+                                            }
+                                            ui.separator();
+                                            let modified_label = Label::new("Modified")
+                                                .halign(Align::Center)
+                                                .selectable(false);
+                                            ui.add(modified_label);
+                                        },
+                                        EditState::Unaltered => (),
+                                        EditState::Synced => {
+                                            ui.separator();
+                                            let synced_label = Label::new("Synced")
+                                                .halign(Align::Center)
+                                                .selectable(false);
+                                            ui.add(synced_label);
+                                        },
                                     }
-
-                                    let discard_changes = ui.button("Discard Changes");
-                                    if discard_changes.clicked() {
-                                        if self.edit_state.needs_update() {
-                                            self.settings_copy.apply_settings(&original_settings);
-                                        }
-                                        self.edit_state = EditState::Unaltered;
-                                    }
-                                }
-                                match self.edit_state {
-                                    EditState::Modified => {
-                                        ui.add(
-                                            Label::new("Modified")
-                                                .selectable(false)
-                                        ).on_hover_cursor(CursorIcon::Default);
-                                    },
-                                    EditState::Unaltered => (),
-                                    EditState::Synced => {
-                                        ui.add(
-                                            Label::new("Synced")
-                                                .selectable(false)
-                                        ).on_hover_cursor(CursorIcon::Default);
-                                    },
-                                }
+                                });
                             });
                         });
                     });
+                    ui.vertical(|ui| {
+                        const TABS: &[Tab<'static, SettingsTab>] = &[
+                            Tab::new("General", SettingsTab::General),
+                            Tab::new("Projects", SettingsTab::Projects),
+                            Tab::new("Licenses", SettingsTab::Licenses),
+                            Tab::new("Templates", SettingsTab::Templates),
+                            Tab::new("Style", SettingsTab::Style),
+                            // Tab::new("Other", SettingsTab::Extended("other")),
+                            // Tab::new("End", SettingsTab::Extended("end")),
+                        ];
+                        Tabs::new(&mut self.settings_tab_index, TABS)
+                            .with_text_align(Align::Center)
+                            .with_size_mode(TabSizeMode::Grow)
+                            .show(ui, |_index, tab, ui| {
+                                match tab {
+                                    SettingsTab::General => {
+                                        self.general_gui.ui(changed, &mut self.settings_copy.general, ui);
+                                    }
+                                    SettingsTab::Projects => {
+                                        self.projects_gui.ui(changed, &mut self.settings_copy.projects, ui);
+                                    }
+                                    SettingsTab::Licenses => {}
+                                    SettingsTab::Templates => {}
+                                    SettingsTab::Style => {
+                                        Frame::NONE
+                                            .inner_margin(Margin::same(8))
+                                            .show(ui, |ui| {
+                                                self.style_gui.ui(changed, &mut self.settings_copy.style, ui)
+                                            });
+                                    }
+                                }
+
+                            });
+                    });
+                });
+
                 if changed.is_marked() {
                     if *original_settings != self.settings_copy {
                         self.edit_state = EditState::Modified;

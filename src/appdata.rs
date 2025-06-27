@@ -1,6 +1,6 @@
 use std::{fs::File, io::Write, path::{
     Path, PathBuf,
-}};
+}, time::SystemTime};
 
 use directories::ProjectDirs;
 use eframe::{
@@ -115,6 +115,18 @@ impl AppConfig {
         let file = self.open(relative_path)?;
         let mut reader = std::io::BufReader::new(file);
         Ok(bincode::decode_from_std_read(&mut reader, bincode::config::standard())?)
+    }
+
+    pub fn settings_modified_time(&self) -> std::io::Result<SystemTime> {
+        crate::util::fsutil::modified_system_time(self.settings_path())
+    }
+
+    pub fn settings_modified_time_utc(&self) -> std::io::Result<chrono::DateTime<chrono::Utc>> {
+        Ok(self.settings_modified_time()?.into())
+    }
+
+    pub fn settings_modified_time_local(&self) -> std::io::Result<chrono::DateTime<chrono::Local>> {
+        Ok(self.settings_modified_time()?.into())
     }
 
     #[inline]

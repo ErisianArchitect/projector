@@ -381,7 +381,7 @@ impl App for ProjectorApp {
                             ScrollArea::new(Vec2b::new(false, true))
                             .auto_shrink(Vec2b::FALSE)
                             .show(ui, |ui| {
-                                ui.with_inner_margin(Margin::symmetric(16, 0), |ui| {
+                                ui.with_inner_margin(Margin::symmetric(16, 8), |ui| {
                                     ui.spacing_mut().item_spacing = Vec2::ZERO;
                                     let mut open_editor_toggle = self.runtime.recent_project_context.open_editor;
                                     let mut open_shell_toggle = self.runtime.recent_project_context.open_shell;

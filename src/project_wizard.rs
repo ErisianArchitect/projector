@@ -31,6 +31,8 @@ impl ProjectWizard {
                 ui.set_size(vec2(700.0, 700.0));
                 ui.bottom_up(Align::Min, |ui| {
                     ui.with_inner_margin(Margin::same(8), |ui| {
+                        // let inner_rect = ui.response().rect + Margin::same(8);
+                        // ui.painter().rect_filled(inner_rect, CornerRadius::ZERO, Color32::LIGHT_GRAY);
                         menu::bar(ui, |ui| {
                             ui.right_to_left(Align::Center, |ui| {
                                 ui.label("💾🕖 7:28 PM 6/27/2025");
