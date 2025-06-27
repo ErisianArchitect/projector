@@ -674,6 +674,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -2591,7 +2592,7 @@ checksum = "afbdc74edc00b6f6a218ca6a5364d6226a259d4b8ea1af4a0ea063f27e179f4d"
 
 [[package]]
 name = "projector"
-version = "0.1.0"
+version = "0.1.0-indev"
 dependencies = [
  "bincode",
  "chrono",

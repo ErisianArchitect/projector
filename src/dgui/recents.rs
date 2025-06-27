@@ -1,9 +1,95 @@
 
+use std::{
+    cmp::Ordering,
+    path::{Path, PathBuf},
+};
+
+use chrono::Timelike;
 use eframe::{
     egui::*,
 };
-use crate::projects::{ProjectPath, ProjectType};
+use crate::projects::ProjectPath;
 
+#[repr(u8)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, bincode::Encode, bincode::Decode)]
+pub enum Order {
+    #[default]
+    Ascending = 0,
+    Descending = 1,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, bincode::Encode, bincode::Decode)]
+pub enum Recency {
+    Most,
+    Least,
+}
+
+#[repr(u8)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, bincode::Encode, bincode::Decode)]
+pub enum RecentsSort {
+    #[default]
+    Default,
+    NameAscending,
+    NameDescending,
+    MostRecent,
+    LeastRecent,
+}
+
+impl RecentsSort {
+    pub fn default_sort(lhs: (usize, &RecentEntry), rhs: (usize, &RecentEntry)) -> Ordering {
+        let lhs = lhs.0;
+        let rhs = rhs.0;
+        lhs.cmp(&rhs)
+    }
+
+    pub fn ascending_name_sort(lhs: (usize, &RecentEntry), rhs: (usize, &RecentEntry)) -> Ordering {
+        let lhs = lhs.1.path.file_name().and_then(std::ffi::OsStr::to_str).unwrap_or("");
+        let rhs = rhs.1.path.file_name().and_then(std::ffi::OsStr::to_str).unwrap_or("");
+        lhs.cmp(rhs)
+    }
+
+    pub fn descending_name_sort(lhs: (usize, &RecentEntry), rhs: (usize, &RecentEntry)) -> Ordering {
+        let lhs = lhs.1.path.file_name().and_then(std::ffi::OsStr::to_str).unwrap_or("");
+        let rhs = rhs.1.path.file_name().and_then(std::ffi::OsStr::to_str).unwrap_or("");
+        rhs.cmp(lhs)
+    }
+
+    pub fn most_recent_sort(lhs: (usize, &RecentEntry), rhs: (usize, &RecentEntry)) -> Ordering {
+        let lhs = &lhs.1.time;
+        let rhs = &rhs.1.time;
+        rhs.cmp(lhs)
+    }
+
+    pub fn least_recent_sort(lhs: (usize, &RecentEntry), rhs: (usize, &RecentEntry)) -> Ordering {
+        let lhs = &lhs.1.time;
+        let rhs = &rhs.1.time;
+        lhs.cmp(rhs)
+    }
+
+    pub fn sort_by_fn(self) -> fn((usize, &RecentEntry), (usize, &RecentEntry)) -> Ordering {
+        match self {
+            RecentsSort::Default => Self::default_sort,
+            RecentsSort::NameAscending => Self::ascending_name_sort,
+            RecentsSort::NameDescending => Self::descending_name_sort,
+            RecentsSort::MostRecent => Self::most_recent_sort,
+            RecentsSort::LeastRecent => Self::least_recent_sort,
+        }
+    }
+
+    pub fn sort(self, recents: &[RecentEntry], order: &mut [u16]) {
+        let sort_by = self.sort_by_fn();
+        order.sort_by(move |&lhs, &rhs| {
+            let l_index = lhs as usize;
+            let r_index = rhs as usize;
+            let l_obj = &recents[l_index];
+            let r_obj = &recents[r_index];
+            let lhs = (l_index, l_obj);
+            let rhs = (r_index, r_obj);
+            sort_by(lhs, rhs)
+        });
+    }
+}
 
 /// Not to be confused with [Recents].
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -63,6 +149,116 @@ impl<'a> Recent<'a> {
     }
 }
 
+pub struct RecentEntryTimeCurry {
+    time: chrono::DateTime<chrono::Utc>,
+}
+
+impl RecentEntryTimeCurry {
+    #[must_use]
+    #[inline]
+    pub fn now() -> Self {
+        Self {
+            time: chrono::Utc::now(),
+        }
+    }
+
+    #[inline]
+    pub fn with(self, path: ProjectPath) -> RecentEntry {
+        RecentEntry {
+            path,
+            time: self.time,
+        }
+    }
+
+    #[inline]
+    pub fn rust<P: Into<PathBuf>>(self, path: P) -> RecentEntry {
+        RecentEntry {
+            path: ProjectPath::Rust(path.into()),
+            time: self.time,
+        }
+    }
+
+    #[inline]
+    pub fn python<P: Into<PathBuf>>(self, path: P) -> RecentEntry {
+        RecentEntry {
+            path: ProjectPath::Python(path.into()),
+            time: self.time,
+        }
+    }
+
+    #[inline]
+    pub fn web<P: Into<PathBuf>>(self, path: P) -> RecentEntry {
+        RecentEntry {
+            path: ProjectPath::Python(path.into()),
+            time: self.time,
+        }
+    }
+
+    #[inline]
+    pub fn other<P: Into<PathBuf>>(self, path: P) -> RecentEntry {
+        RecentEntry {
+            path: ProjectPath::Other(path.into()),
+            time: self.time,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RecentEntry {
+    path: ProjectPath,
+    time: chrono::DateTime<chrono::Utc>,
+}
+
+impl RecentEntry {
+    #[must_use]
+    #[inline]
+    pub fn now_curry() -> RecentEntryTimeCurry {
+        RecentEntryTimeCurry::now()
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn now(path: ProjectPath) -> Self {
+        Self {
+            path,
+            time: chrono::Utc::now(),
+        }
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn new(path: ProjectPath, time: chrono::DateTime<chrono::Utc>) -> Self {
+        Self {
+            path,
+            time,
+        }
+    }
+}
+
+impl bincode::Encode for RecentEntry {
+    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
+        self.path.encode(encoder)?;
+        // let time: SystemTime = self.time.into();
+        // time.encode(encoder)
+        let seconds = self.time.timestamp();
+        let nsecs = self.time.timestamp_subsec_nanos();
+        seconds.encode(encoder)?;
+        nsecs.encode(encoder)
+    }
+}
+
+impl<Ctx> bincode::Decode<Ctx> for RecentEntry {
+    fn decode<D: bincode::de::Decoder<Context = Ctx>>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError> {
+        let path = ProjectPath::decode(decoder)?;
+        let seconds = i64::decode(decoder)?;
+        let nsecs = u32::decode(decoder)?;
+        Ok(Self {
+            path,
+            time: chrono::DateTime::from_timestamp(seconds, nsecs).unwrap_or_default(),
+        })
+    }
+}
+
 // Hmm. What do I need for this?
 // I need there to be a list that has all of the recents
 // Then I also need another list for the recents that are to be displayed (controlled by a filter/order)
@@ -70,16 +266,72 @@ impl<'a> Recent<'a> {
 // When updates (such as removals or refreshes) happen, the display list must be refreshed.
 /// Not to be confused with [Recent].
 pub struct Recents {
-    recents: Vec<ProjectPath>,
+    recents: Vec<RecentEntry>,
     order: Vec<u16>,
+    sort: RecentsSort,
 }
 
 impl Recents {
-    pub fn new(recents: Vec<ProjectPath>) -> Self {
+    pub fn new(recents: Vec<RecentEntry>) -> Self {
         Self {
-            order: (0..recents.len()).map(|_| 0u16).collect(),
+            order: (0..recents.len()).map(|i| i as u16).collect(),
             recents,
+            sort: RecentsSort::Default,
         }
+    }
+
+    pub fn set_sort(&mut self, new_sort: RecentsSort) {
+        let Self {
+            recents,
+            order,
+            sort,
+        } = self;
+        *sort = new_sort;
+        new_sort.sort(recents, order);
+    }
+
+    pub fn order_by_name(&mut self, sort: Order) {
+        let sort = match sort {
+            Order::Ascending => RecentsSort::NameAscending,
+            Order::Descending => RecentsSort::NameDescending,
+        };
+        self.set_sort(sort);
+    }
+
+    pub fn order_by_time(&mut self, recency: Recency) {
+        let sort = match recency {
+            Recency::Most => RecentsSort::MostRecent,
+            Recency::Least => RecentsSort::LeastRecent,
+        };
+        self.set_sort(sort);
+    }
+}
+
+impl std::ops::Index<usize> for Recents {
+    type Output = RecentEntry;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        let entry_index = self.order[index] as usize;
+        &self.recents[entry_index]
+    }
+}
+
+impl bincode::Encode for Recents {
+    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
+        self.recents.encode(encoder)
+    }
+}
+
+impl<Ctx> bincode::Decode<Ctx> for Recents {
+    fn decode<D: bincode::de::Decoder<Context = Ctx>>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError> {
+        let recents = Vec::<RecentEntry>::decode(decoder)?;
+        let order = (0..recents.len()).map(|i| i as u16).collect::<Vec<_>>();
+        Ok(Self {
+            recents,
+            order,
+            // It doesn't make sense to me to persist the sort, so it won't be persisted.
+            sort: RecentsSort::Default,
+        })
     }
 }
 

@@ -1,5 +1,7 @@
 use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
 
+use eframe::egui::Response;
+
 
 mod private {
     use std::sync::{atomic::AtomicBool, Arc};
@@ -40,6 +42,12 @@ impl<'a> MarkerRef<'a> {
     }
 
     #[inline]
+    pub fn record_change(self, response: Response) -> Response {
+        self.mark_if(response.changed());
+        response
+    }
+
+    #[inline]
     pub fn reset(self) -> bool {
         self.marker.swap(false, Ordering::Relaxed)
     }
@@ -52,6 +60,34 @@ impl<'a> MarkerRef<'a> {
     #[inline]
     pub fn mark_only(self) -> MarkOnly<'a> {
         MarkOnly::new(self)
+    }
+
+    #[inline]
+    pub fn marker_fn(self) -> impl 'a + Copy + Fn() -> bool {
+        move || -> bool {
+            self.mark()
+        }
+    }
+
+    #[inline]
+    pub fn conditional_marker_fn(self) -> impl 'a + Copy + Fn(bool) -> bool {
+        move |condition: bool| -> bool {
+            self.mark_if(condition)
+        }
+    }
+
+    #[inline]
+    pub fn response_marker_fn(self) -> impl 'a + Copy + Fn(&Response) -> bool {
+        move |response: &Response| -> bool {
+            self.mark_if(response.changed())
+        }
+    }
+
+    #[inline]
+    pub fn conditional_response_marker_fn(self) -> impl 'a + Copy + Fn(bool, &Response) -> bool {
+        move |condition: bool, response: &Response| -> bool {
+            self.mark_if(condition && response.changed())
+        }
     }
 }
 
@@ -82,6 +118,12 @@ impl Marker {
     }
 
     #[inline]
+    pub fn record_change(&self, response: Response) -> Response {
+        self.mark_if(response.changed());
+        response
+    }
+
+    #[inline]
     pub fn reset(&self) -> bool {
         self.marker.swap(false, Ordering::Relaxed)
     }
@@ -102,6 +144,12 @@ impl Marker {
     }
 }
 
+impl Default for Marker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArcMarker {
     #[inline]
     pub fn new() -> Self {
@@ -118,6 +166,12 @@ impl ArcMarker {
     #[inline]
     pub fn mark_if(&self, condition: bool) -> bool {
         condition && self.mark()
+    }
+
+    #[inline]
+    pub fn record_change(&self, response: Response) -> Response {
+        self.mark_if(response.changed());
+        response
     }
 
     #[inline]
@@ -149,11 +203,19 @@ impl Clone for ArcMarker {
     }
 }
 
+impl Default for ArcMarker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[inline]
 pub const fn marker() -> AtomicMarker<AtomicBool> {
     Marker::new()
 }
 
+/// [MarkOnly] is a wrapper over [MarkerRef], but disallows resetting of the marked value. You can only mark, and check if the value has been marked.
+/// Just like [MarkerRef], [MarkOnly] can be freely copied around. This will copy the underlying reference to an [AtomicBool].
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy)]
 pub struct MarkOnly<'a> {
@@ -179,8 +241,42 @@ impl<'a> MarkOnly<'a> {
     }
 
     #[inline]
+    pub fn record_change(self, response: Response) -> Response {
+        self.mark_if(response.changed());
+        response
+    }
+
+    #[inline]
     pub fn is_marked(self) -> bool {
         self.marker.is_marked()
+    }
+
+    #[inline]
+    pub fn marker_fn(self) -> impl 'a + Copy + Fn() -> bool {
+        move || -> bool {
+            self.mark()
+        }
+    }
+
+    #[inline]
+    pub fn conditional_marker_fn(self) -> impl 'a + Copy + Fn(bool) -> bool {
+        move |condition: bool| -> bool {
+            self.mark_if(condition)
+        }
+    }
+
+    #[inline]
+    pub fn response_marker_fn(self) -> impl 'a + Copy + Fn(&Response) -> bool {
+        move |response: &Response| -> bool {
+            self.mark_if(response.changed())
+        }
+    }
+
+    #[inline]
+    pub fn conditional_response_marker_fn(self) -> impl 'a + Copy + Fn(bool, &Response) -> bool {
+        move |condition: bool, response: &Response| -> bool {
+            self.mark_if(condition && response.changed())
+        }
     }
 }
 
@@ -200,6 +296,7 @@ mod tests {
         }
         let marker = marker();
         let mark = marker.marker_ref();
+        
         take_marker(mark);
         assert!(mark.is_marked());
         mark.reset();
@@ -216,6 +313,6 @@ mod tests {
         assert!(!mark.is_marked());
         take_mark_only(mark_only, true);
         assert!(mark.is_marked());
-
+        mark.reset();
     }
 }

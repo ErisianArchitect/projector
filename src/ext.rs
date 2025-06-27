@@ -10,9 +10,16 @@ pub trait UiExt {
     fn rtl_label(&mut self, valign: Align, text: impl Into<WidgetText>) -> Response;
     fn allocate_blank_response(&mut self) -> Response;
     fn debug_rect(&mut self, rect: Rect);
-    fn setting_ui<R, F: FnOnce(&mut Ui) -> R>(&mut self, label_width: f32, label: impl Into<String>, info: impl Into<WidgetText>, color: impl Into<Color32>, add_contents: F) -> InnerResponse<R>;
+    fn setting_ui<R, F: FnOnce(&mut Ui) -> R>(&mut self, label_width: f32, label: impl Into<WidgetText>, info: impl Into<WidgetText>, color: impl Into<Color32>, add_contents: F) -> InnerResponse<R>;
     fn toggle_box(&mut self, toggle: &mut bool) -> Response;
     fn clicked(&mut self, text: impl Into<WidgetText>) -> bool;
+    fn pin_btn(&mut self, size: f32, color: Color32) -> Response;
+    fn with_inner_margin<R, F>(&mut self, margin: impl Into<Margin>, add_contents: F) -> InnerResponse<R>
+    where F: FnOnce(&mut Ui) -> R;
+    fn right_to_left<R, F>(&mut self, align: Align, add_contents: F) -> InnerResponse<R>
+    where F: FnOnce(&mut Ui) -> R;
+    fn bottom_up<R, F>(&mut self, align: Align, add_contents: F) -> InnerResponse<R>
+    where F: FnOnce(&mut Ui) -> R;
 }
 
 impl UiExt for Ui {
@@ -62,22 +69,25 @@ impl UiExt for Ui {
         self.painter().rect_stroke(rect, CornerRadius::ZERO, Stroke::new(1.0, Color32::RED), StrokeKind::Inside);
     }
 
-    fn setting_ui<R, F: FnOnce(&mut Ui) -> R>(&mut self, label_width: f32, label: impl Into<String>, info: impl Into<WidgetText>, color: impl Into<Color32>, add_contents: F) -> InnerResponse<R> {
-        let resp = self.horizontal(|ui| {
+    fn setting_ui<R, F: FnOnce(&mut Ui) -> R>(&mut self, label_width: f32, label: impl Into<WidgetText>, info: impl Into<WidgetText>, color: impl Into<Color32>, add_contents: F) -> InnerResponse<R> {
+        self.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = ui.ctx().style().spacing.item_spacing;
+            // This must be here because if you put it inside the Frame, the rect is affected by the inner margin.
             let contains_pointer = ui.response().contains_pointer();
             Frame::NONE
             .fill(color.into())
             .inner_margin(Margin::symmetric(4, 4))
-            .show(ui, |ui|{
+            .show(ui, |ui| {
                 Frame::NONE
                 .show(ui, |ui| {
                     ui.set_width(label_width);
                     ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                        let label: String = label.into();
+                        let label: WidgetText = label.into();
                         let font_id = ui.style().text_styles[&TextStyle::Body].clone();
+                        let label_job = label.into_layout_job(ui.style(), font_id.into(), Align::Min);
 
                         let label_galley = ui.fonts(|fonts| {
-                            fonts.layout_no_wrap(label, font_id, ui.style().visuals.text_color())
+                            fonts.layout_job(label_job)
                         });
                         let label_size = label_galley.size();
                         let int_height = ui.style().spacing.interact_size.y;
@@ -105,14 +115,57 @@ impl UiExt for Ui {
                     ui.set_width(ui.available_width());
                     add_contents(ui)
                 }).inner
-            })
-        });
-        resp.inner
+            }).inner
+        })
     }
 
+    fn pin_btn(&mut self, size: f32, color: Color32) -> Response {
+        let (rect, resp) = self.allocate_exact_size(Vec2::splat(size), Sense::click());
+        let p = self.painter();
+        p.text(rect.center(), Align2::CENTER_CENTER, crate::charcons::PUSHPIN, FontId::monospace(16.0), color);
+        resp
+    }
+
+    #[inline]
     fn clicked(&mut self, text: impl Into<WidgetText>) -> bool {
         let text: WidgetText = text.into();
         self.button(text).clicked()
+    }
+
+    fn with_inner_margin<R, F>(&mut self, inner_margin: impl Into<Margin>, add_contents: F) -> InnerResponse<R>
+    where F: FnOnce(&mut Ui) -> R {
+        let margin: Margin = inner_margin.into();
+        Frame::NONE
+        .inner_margin(margin)
+        .show(self, add_contents)
+    }
+
+    #[inline]
+    fn right_to_left<R, F>(&mut self, align: Align, add_contents: F) -> InnerResponse<R>
+    where F: FnOnce(&mut Ui) -> R {
+        self.with_layout(Layout::right_to_left(align), add_contents)
+    }
+
+    #[inline]
+    fn bottom_up<R, F>(&mut self, align: Align, add_contents: F) -> InnerResponse<R>
+    where F: FnOnce(&mut Ui) -> R {
+        self.with_layout(Layout::bottom_up(align), add_contents)
+    }
+}
+
+pub trait DirectionExt {
+    fn offset(self, dist: f32) -> Vec2;
+}
+
+impl DirectionExt for Direction {
+    #[inline]
+    fn offset(self, dist: f32) -> Vec2 {
+        match self {
+            Direction::LeftToRight => vec2(dist, 0.0),
+            Direction::RightToLeft => vec2(-dist, 0.0),
+            Direction::TopDown => vec2(0.0, dist),
+            Direction::BottomUp => vec2(0.0, -dist),
+        }
     }
 }
 

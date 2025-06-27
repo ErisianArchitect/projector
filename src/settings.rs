@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::{path::{Path, PathBuf}, sync::atomic::{AtomicBool, Ordering}};
 use eframe::{
     egui::{self, *},
 };
@@ -15,22 +15,32 @@ use crate::{
     },
 };
 
-#[derive(Debug)]
-struct ResponseUpdater {
-    response: Response,
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, bincode::Encode, bincode::Decode)]
+pub enum IncludePathTypes {
+    Files = 1,
+    Directories = 2,
+    FilesAndDirectories = 3,
 }
 
-impl ResponseUpdater {
-    fn new(response: Response) -> Self {
-        Self { response: response }
+impl IncludePathTypes {
+    #[inline]
+    pub const fn text(self) -> &'static str {
+        match self {
+            IncludePathTypes::Files => "Files",
+            IncludePathTypes::Directories => "Directories",
+            IncludePathTypes::FilesAndDirectories => "Files and Directories",
+        }
     }
 
-    fn merge(&mut self, response: Response) {
-        self.response = self.response.union(response);
+    #[inline]
+    pub const fn include_files(self) -> bool {
+        ((self as u8) & 1) != 0
     }
 
-    fn finish(self) -> Response {
-        self.response
+    #[inline]
+    pub const fn include_directories(self) -> bool {
+        ((self as u8) & 2) != 0
     }
 }
 
@@ -71,8 +81,8 @@ settings_structs!{
     #[derive(Debug, Clone, PartialEq, bincode::Encode, bincode::Decode)]
     pub struct General {
         pub open_after_create: bool = true,
-        pub close_after_open: bool = true,
-        pub default_projects_tab: MainTab = MainTab::Project(ProjectType::Rust),
+        pub close_after_open: bool = false,
+        pub default_projects_tab: MainTab = MainTab::Main,
         pub editor_command: String = String::from("code {path}"),
         pub shell_command: String = String::from(if cfg!(target_os = "windows") {
             "wt.exe --startingDirectory {path}"
@@ -89,13 +99,15 @@ settings_structs!{
         pub dummy_string: String = String::from("dummy"),
         pub dummy_toggle: bool = false,
         pub clicker_counter: u64 = 0,
+        pub dummy_number: u64 = 0,
     }
 
     #[derive(Debug, Clone, PartialEq, bincode::Encode, bincode::Decode)]
     pub struct Rust {
-        pub project_directories: Vec<PathBuf> = Vec::new(),
         pub editor_command: String = String::new(),
-        pub include_files: bool = false,
+        pub project_directories: Vec<PathBuf> = Vec::new(),
+        pub include_path_types: IncludePathTypes = IncludePathTypes::Directories,
+        pub restrict_extensions: bool = false,
         pub include_extensions: Vec<String> = vec![
             String::from("rs"),
         ],
@@ -103,8 +115,9 @@ settings_structs!{
 
     #[derive(Debug, Clone, PartialEq, bincode::Encode, bincode::Decode)]
     pub struct Python {
+        pub editor_command: String = String::new(),
         pub project_directories: Vec<PathBuf> = Vec::new(),
-        pub include_files: bool = true,
+        pub include_path_types: IncludePathTypes = IncludePathTypes::FilesAndDirectories,
         pub include_extensions: Vec<String> = vec![
             String::from("py"),
             String::from("pyw"),
@@ -114,8 +127,9 @@ settings_structs!{
 
     #[derive(Debug, Clone, PartialEq, bincode::Encode, bincode::Decode)]
     pub struct Web {
+        pub editor_command: String = String::new(),
         pub project_directories: Vec<PathBuf> = Vec::new(),
-        pub include_files: bool = false,
+        pub include_path_types: IncludePathTypes = IncludePathTypes::FilesAndDirectories,
         pub include_extensions: Vec<String> = vec![
             String::from("html"),
             String::from("htm"),
@@ -171,6 +185,7 @@ settings_structs!{
 }
 
 impl Settings {
+    #[inline]
     pub fn create_settings_modal(&self) -> ModalUi {
         ModalUi::Settings(SettingsDialog::from_settings(self.clone()))
     }
@@ -180,14 +195,20 @@ impl Settings {
     }
 }
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SettingsTab {
-    General,
-    Projects,
-    Licenses,
-    Templates,
-    Style,
-    Extended(&'static str),
+    General = 0,
+    Projects = 1,
+    Licenses = 2,
+    Templates = 3,
+    Style = 4,
+}
+
+impl SettingsTab {
+    pub const fn tab_index(self) -> usize {
+        self as usize
+    }
 }
 
 pub struct DialogCloser<'a> {
@@ -203,6 +224,67 @@ impl<'a> DialogCloser<'a> {
         *self.close = true;
     }
 }
+
+#[repr(transparent)]
+pub struct BaseCloser<T> {
+    close: T,
+}
+
+pub type OwnedCloser = BaseCloser<AtomicBool>;
+pub type Closer<'a> = BaseCloser<&'a BaseCloser<AtomicBool>>;
+
+impl OwnedCloser {
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            close: AtomicBool::new(false),
+        }
+    }
+
+    #[inline]
+    pub fn close(&self) -> bool {
+        !self.close.swap(true, Ordering::Relaxed)
+    }
+
+    #[inline]
+    pub fn is_closed(&self) -> bool {
+        self.close.load(Ordering::Relaxed)
+    }
+
+    #[inline]
+    pub fn make_closer(&self) -> Closer {
+        Closer::new(self)
+    }
+}
+
+impl<'a> Closer<'a> {
+    pub fn new(closer: &'a OwnedCloser) -> Self {
+        Self {
+            close: closer,
+        }
+    }
+
+    #[inline]
+    pub fn close(self) -> bool {
+        self.close.close()
+    }
+
+    #[inline]
+    pub fn is_closed(self) -> bool {
+        self.close.is_closed()
+    }
+}
+
+impl<'a> Clone for Closer<'a> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            close: self.close,
+        }
+    }
+}
+
+impl<'a> Copy for Closer<'a> {}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EditState {
@@ -225,13 +307,13 @@ impl EditState {
 }
 
 pub struct SettingsDialog {
-    settings_copy: Settings,
-    settings_tab_index: usize,
-    edit_state: EditState,
-    request_close: bool,
-    general_gui: GeneralGui,
-    projects_gui: ProjectsGui,
-    style_gui: StyleGui,
+    pub settings_copy: Settings,
+    pub settings_tab_index: usize,
+    pub edit_state: EditState,
+    pub request_close: bool,
+    pub general_gui: GeneralGui,
+    pub projects_gui: ProjectsGui,
+    pub style_gui: StyleGui,
 }
 
 pub struct SettingsDialogResponse {
@@ -259,9 +341,27 @@ impl SettingsDialog {
         }
     }
 
+    pub fn from_settings_tab(settings: Settings, tab: SettingsTab) -> Self {
+        Self {
+            settings_copy: settings,
+            settings_tab_index: tab.tab_index(),
+            edit_state: EditState::Unaltered,
+            request_close: false,
+            general_gui: GeneralGui {
+
+            },
+            projects_gui: ProjectsGui {
+                tab_index: 0,
+            },
+            style_gui: StyleGui {
+
+            },
+        }
+    }
+
     pub fn show(
         &mut self,
-        mut closer: DialogCloser<'_>,
+        closer: Closer<'_>,
         app_data: &mut AppData,
         original_settings: &mut Settings,
         ui: &mut Ui,
@@ -290,14 +390,12 @@ impl SettingsDialog {
         let changed = change_marker.mark_only();
         modal::Modal::new(Id::new("settings_dialog_modal"))
             .area(
-                Area::new(Id::new("settings_dialog_modal_-_area"))
+                Area::new(Id::new("settings_dialog_modal_area"))
                     .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
             )
             .frame(
-                Frame::new()
-                    .corner_radius(CornerRadius::ZERO)
-                    .inner_margin(Margin::ZERO)
-                    .outer_margin(Margin::ZERO)
+                Frame::NONE
+                    .fill(Color32::ORANGE)
                     // .stroke(Stroke::new(1.0, Color32::GRAY))
             )
             .show(ui.ctx(), |ui| {
@@ -318,7 +416,7 @@ impl SettingsDialog {
                     .with_text_align(Align::Center)
                     .with_size_mode(TabSizeMode::Grow)
                     .show(ui, |_index, tab, ui| {
-                        crate::app::set_style(ui.style_mut());
+                        // crate::app::set_style(ui.style_mut());
                         // ui.with_layout(Layout::centered_and_justified(Direction::TopDown), |ui| {
                         // ui.set_min_height(300.0);
                         // ui.set_min_size(ui.max_rect().size());
@@ -352,13 +450,6 @@ impl SettingsDialog {
                                             self.style_gui.ui(changed, &mut self.settings_copy.style, ui)
                                         });
                                 }
-                                SettingsTab::Extended(name) => {
-                                    Frame::NONE
-                                        .inner_margin(Margin::same(8))
-                                        .show(ui, |ui| {
-                                            ui.colored_label(Color32::RED, format!("No specialized match arm: {name:?}"));
-                                        });
-                                }
                             }
                             // let final_resp = ui.with_layout(Layout::default(), |ui| {
                             //     // let resp = ui.allocate_response(Vec2::ZERO, Sense::empty());
@@ -371,7 +462,10 @@ impl SettingsDialog {
                             ui.horizontal(|ui| {
                                 let win_pos = bottom_rect.left_bottom();
                                 let close = ui.button("Close");
-                                if close.clicked() {
+                                let esc_pressed = ui.input_mut(|i| {
+                                    i.consume_key(Modifiers::NONE, Key::Escape)
+                                });
+                                if esc_pressed || close.clicked() {
                                     self.request_close = true;
                                 }
                                 if self.request_close {
@@ -386,7 +480,7 @@ impl SettingsDialog {
                                                 .pivot(Align2::LEFT_BOTTOM)
                                             ).frame(frame)
                                             .show(ui.ctx(), |ui| {
-                                                crate::app::set_style(ui.style_mut());
+                                                // crate::app::set_style(ui.style_mut());
                                                 ui.set_min_size(vec2(240.0, 60.0));
                                                 ui.set_max_size(vec2(240.0, 60.0));
                                                 let avail = ui.available_rect_before_wrap();
@@ -436,19 +530,6 @@ impl SettingsDialog {
 
                                                 let p = ui.painter_at(msg_rect);
                                                 p.text(msg_rect.center(), Align2::CENTER_CENTER, "Settings have been modified.", FontId::proportional(16.0), ui.style().visuals.widgets.active.text_color());
-                                                // if ui.button("Save").clicked() {
-                                                //     if let Ok(_) = apply_settings(original_settings, &self.settings_copy, app_data) {
-                                                //         self.edit_state = EditState::Synced;
-                                                //     } else {
-                                                //         eprintln!("Failed to save settings.");
-                                                //     }
-                                                // }
-                                                // if ui.button("Discard").clicked() {
-                                                //     closer.close();
-                                                // }
-                                                // if ui.button("Cancel").clicked() {
-                                                //     self.request_close = false;
-                                                // }
                                             });
                                     } else {
                                         closer.close();
@@ -545,9 +626,7 @@ impl GeneralGui {
         ui: &mut Ui,
     ) {
         // let avail = ui.available_rect_before_wrap();
-        let record_change = move |resp: &Response| {
-            changed.mark_if(resp.changed())
-        };
+        let record_change = changed.response_marker_fn();
         ui.centered_and_justified(|ui| {
             Frame::NONE
             .inner_margin(Margin::same(8))
@@ -582,18 +661,17 @@ impl GeneralGui {
                         record_change(&ComboBox::new("start_projects_tab_combo", "")
                             .selected_text(general.default_projects_tab.text())
                             .show_ui(ui, |ui| {
-                                let recent_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::RecentProjects, "Recent");
-                                record_change(&recent_label);
-                                let rust_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::Project(ProjectType::Rust), "Rust");
-                                record_change(&rust_label);
-                                let python_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::Project(ProjectType::Python), "Python");
-                                record_change(&python_label);
-                                let web_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::Project(ProjectType::Web), "Web");
-                                record_change(&web_label);
-                                let other_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::Project(ProjectType::Other), "Other");
-                                record_change(&other_label);
-                                let text_label = ui.selectable_value(&mut general.default_projects_tab, MainTab::Text, "Text");
-                                record_change(&text_label);
+                                let projects_tab = &mut general.default_projects_tab;
+                                let mut selectable = move |tab: MainTab| {
+                                    let select_resp = ui.selectable_value(projects_tab, tab, tab.text());
+                                    record_change(&select_resp);
+                                };
+                                selectable(MainTab::Main);
+                                selectable(MainTab::Project(ProjectType::Rust));
+                                selectable(MainTab::Project(ProjectType::Python));
+                                selectable(MainTab::Project(ProjectType::Web));
+                                selectable(MainTab::Project(ProjectType::Other));
+                                selectable(MainTab::Text);
                             }).response);
                     }
                 );
@@ -665,6 +743,20 @@ impl GeneralGui {
                         record_change(&dummy);
                     }
                 );
+                ui.setting_ui(
+                    LABEL_WIDTH,
+                    "Debug",
+                    "Debug",
+                    alt.next(),
+                    |ui| {
+                        let dummy = ui.button("Mark Changed");
+                        _=ui.button("Test");
+                        if dummy.clicked() {
+                            general.dummy_number = general.dummy_number.wrapping_add(1);
+                            changed.mark();
+                        }
+                    }
+                );
             });
         });
     }
@@ -696,14 +788,35 @@ impl ProjectsGui {
                             Frame::NONE
                             .inner_margin(Margin::same(8))
                             .show(ui, |ui| {
-                                Grid::new("projects_settings")
-                                .num_columns(2)
-                                .striped(true)
-                                .show(ui, |ui| {
-        
-                                    ui.rtl_label(Align::Center, "Project Directories")
-                                        .on_hover_text("The directories that will be searched for sub-directories/files to add to the project browser.");
-                                    ui.vertical(|ui| {
+                                let mut alt = Alternator::new(Color32::TRANSPARENT, ui.style().visuals.faint_bg_color);
+                                ui.setting_ui(
+                                    LABEL_WIDTH,
+                                    "Editor Command",
+                                    "The editor command used to open Rust projects.\nLeave blank to use the default editor command.",
+                                    alt.next(),
+                                    |ui| {
+                                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                                            let clear_btn = Button::new(crate::charcons::XBOX)
+                                                .frame(false);
+
+                                            let clear_btn_resp = ui.add(clear_btn);
+                                            if clear_btn_resp.clicked() {
+                                                projects.rust.editor_command.clear();
+                                                changed.mark();
+                                            }
+                                            clear_btn_resp.on_hover_text("Clear the text field.");
+                                            let text_edit = TextEdit::singleline(&mut projects.rust.editor_command)
+                                                .desired_width(ui.available_width());
+                                            changed.record_change(ui.add(text_edit));
+                                        });
+                                    }
+                                );
+                                ui.setting_ui(
+                                    LABEL_WIDTH,
+                                    "Project Directories",
+                                    "The directories that will be searched for sub-directories/files to add to the project browser.",
+                                    alt.next(),
+                                    |ui| {
                                         let _u = ScrollArea::new(Vec2b::new(false, true))
                                         .auto_shrink(Vec2b::new(false, true))
                                         // .max_width(200.0)
@@ -713,11 +826,6 @@ impl ProjectsGui {
                                                 ui.label(format!("{}", dir.display())).on_hover_cursor(CursorIcon::Default);
                                             }
                                         });
-                                        // .show_rows(ui, 32.0, projects.rust.project_directories.len(), |ui, range| {
-                                        //     for i in range {
-                                        //         ui.label(format!("{}", projects.rust.project_directories[i].display()));
-                                        //     }
-                                        // });
                                         ui.horizontal(|ui| {
                                             if ui.button("Add Path").clicked() {
                                                 if let Some(path) = rfd::FileDialog::new().pick_folder() {
@@ -726,9 +834,79 @@ impl ProjectsGui {
                                                 }
                                             }
                                         });
-                                    });
-                                    ui.end_row();
-                                });
+                                    }
+                                );
+                                ui.setting_ui(
+                                    LABEL_WIDTH,
+                                    "Include Path Types",
+                                    "The types of paths to include.",
+                                    alt.next(),
+                                    |ui| {
+                                        changed.record_change(ComboBox::new("inc_path_ty_combo", "")
+                                            .selected_text(projects.rust.include_path_types.text())
+                                            .show_ui(ui, |ui| {
+                                                changed.record_change(
+                                                    ui.selectable_value(&mut projects.rust.include_path_types, IncludePathTypes::Files, "Files")
+                                                );
+                                                changed.record_change(
+                                                    ui.selectable_value(&mut projects.rust.include_path_types, IncludePathTypes::Directories, "Directories")
+                                                );
+                                                changed.record_change(
+                                                    ui.selectable_value(&mut projects.rust.include_path_types, IncludePathTypes::FilesAndDirectories, "Files and Directories")
+                                                );
+                                            }).response);
+                                    }
+                                );
+                                if projects.rust.include_path_types.include_files() {
+                                    ui.setting_ui(
+                                        LABEL_WIDTH,
+                                        "Restrict Extensions",
+                                        "If this is set, that means that only the specified extensions will be included.",
+                                        alt.next(),
+                                        |ui| {
+                                            changed.record_change(ui.toggle_box(&mut projects.rust.restrict_extensions));
+                                        }
+                                    );
+                                    if projects.rust.restrict_extensions {
+                                        ui.setting_ui(
+                                            LABEL_WIDTH,
+                                            "Included Extensions",
+                                            "The file extensions that are included.",
+                                            alt.next(),
+                                            |ui| {
+                                                ui.label("Work in progress...");
+                                            }
+                                        );
+                                    }
+                                }
+                                // Grid::new("projects_settings")
+                                // .num_columns(2)
+                                // .striped(true)
+                                // .show(ui, |ui| {
+                                    
+                                //     ui.rtl_label(Align::Center, "Project Directories")
+                                //         .on_hover_text("The directories that will be searched for sub-directories/files to add to the project browser.");
+                                //     ui.vertical(|ui| {
+                                //         let _u = ScrollArea::new(Vec2b::new(false, true))
+                                //         .auto_shrink(Vec2b::new(false, true))
+                                //         // .max_width(200.0)
+                                //         .show(ui, |ui| {
+                                //             let dirs = projects.rust.project_directories.as_slice();
+                                //             for dir in dirs {
+                                //                 ui.label(format!("{}", dir.display())).on_hover_cursor(CursorIcon::Default);
+                                //             }
+                                //         });
+                                //         ui.horizontal(|ui| {
+                                //             if ui.button("Add Path").clicked() {
+                                //                 if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                                //                     projects.rust.project_directories.push(path);
+                                //                     changed.mark();
+                                //                 }
+                                //             }
+                                //         });
+                                //     });
+                                //     ui.end_row();
+                                // });
                             });
                         });
                     }
@@ -748,28 +926,25 @@ impl StyleGui {
         ScrollArea::vertical()
             .auto_shrink(Vec2b::FALSE)
             .show(ui, |ui| {
-                Grid::new("style_settings_grid")
-                    .num_columns(2)
-                    .show(ui, |ui| {
-                        ui.rtl_label(Align::Center, "Tab Size Mode");
-                        let tab_size_mode = ComboBox::new("tab_size_combobox", "")
-                            .selected_text(match style.tab_size_mode {
-                                TabSizeMode::Equal => "Equal",
-                                TabSizeMode::Shrink => "Shrink",
-                                TabSizeMode::Grow => "Grow",
-                                TabSizeMode::Exact(_) => "Exact",
-                                TabSizeMode::ShrinkMin(_) => "Shrink Min",
-                            })
-                            .show_ui(ui, |ui| {
-                                let grow = ui.selectable_value(&mut style.tab_size_mode, TabSizeMode::Grow, "Grow");
-                                record_change(&grow);
-                                let equal = ui.selectable_value(&mut style.tab_size_mode, TabSizeMode::Equal, "Equal");
-                                record_change(&equal);
-                                let shrink = ui.selectable_value(&mut style.tab_size_mode, TabSizeMode::Shrink, "Shrink");
-                                record_change(&shrink);
-                            }).response;
-                        record_change(&tab_size_mode);
-                    });
+                ui.setting_ui(LABEL_WIDTH, "Tab Size Mode", "The size mode for the tabs on the main screen.", Color32::TRANSPARENT, |ui| {
+                    let tab_size_mode = ComboBox::new("tab_size_combobox", "")
+                    .selected_text(match style.tab_size_mode {
+                        TabSizeMode::Equal => "Equal",
+                        TabSizeMode::Shrink => "Shrink",
+                        TabSizeMode::Grow => "Grow",
+                        TabSizeMode::Exact(_) => "Exact",
+                        TabSizeMode::ShrinkMin(_) => "Shrink Min",
+                    })
+                    .show_ui(ui, |ui| {
+                        let grow = ui.selectable_value(&mut style.tab_size_mode, TabSizeMode::Grow, "Grow");
+                        record_change(&grow);
+                        let equal = ui.selectable_value(&mut style.tab_size_mode, TabSizeMode::Equal, "Equal");
+                        record_change(&equal);
+                        let shrink = ui.selectable_value(&mut style.tab_size_mode, TabSizeMode::Shrink, "Shrink");
+                        record_change(&shrink);
+                    }).response;
+                    record_change(&tab_size_mode);
+                });
             });
     }
 }

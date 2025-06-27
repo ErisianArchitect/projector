@@ -5,7 +5,7 @@ use std::{any, collections::VecDeque, io::Write, ops::BitOrAssign, os::windows::
 use eframe::{
     egui::{self, Style, *}, epaint::tessellator::path, App, CreationContext
 };
-use crate::{appdata::AppData, dgui::recents::Recent, ext::{BoolExt, CloserBoolExt, UiExt}, project_wizard::ProjectWizard, projects::ProjectPath};
+use crate::{appdata::AppData, dgui::recents::Recent, ext::{BoolExt, CloserBoolExt, UiExt}, project_wizard::ProjectWizard, projects::ProjectPath, util::marker::Marker};
 use crate::settings::*;
 
 use crate::{settings::Settings, dgui::{self, tabs::{Tab, TabSizeMode, Tabs}}, projects::ProjectType};
@@ -22,7 +22,7 @@ pub fn set_style(style: &mut Style) {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, bincode::Encode, bincode::Decode)]
 pub enum MainTab {
-    RecentProjects,
+    Main,
     Project(ProjectType),
     Text,
 }
@@ -36,7 +36,7 @@ impl Default for MainTab {
 impl MainTab {
     pub const fn text(self) -> &'static str {
         match self {
-            MainTab::RecentProjects => "Recent",
+            MainTab::Main => "Main",
             MainTab::Project(ProjectType::Rust) => "Rust",
             MainTab::Project(ProjectType::Python) => "Python",
             MainTab::Project(ProjectType::Web) => "Web",
@@ -81,6 +81,11 @@ impl ModalUi {
     #[inline]
     pub fn settings(settings: Settings) -> Self {
         Self::Settings(SettingsDialog::from_settings(settings))
+    }
+
+    #[inline]
+    pub fn settings_tab(settings: Settings, tab: SettingsTab) -> Self {
+        Self::Settings(SettingsDialog::from_settings_tab(settings, tab))
     }
 }
 
@@ -138,6 +143,9 @@ pub struct ProjectorApp {
 impl ProjectorApp {
     const QUICK_EDIT_CAPACITY: usize = 8192;
     pub fn boxed_new(cc: &CreationContext<'_>) -> Box<Self> {
+        cc.egui_ctx.style_mut(|style| {
+            set_style(style);
+        });
         let app_data = AppData::from("com", "erisianarchitect", "projector").expect("Failed to create AppData object.");
         app_data.ensure_dirs();
         let settings = match app_data.config().load_settings() {
@@ -161,7 +169,7 @@ impl ProjectorApp {
         };
         Box::new(Self {
             tab_index: match settings.general.default_projects_tab {
-                MainTab::RecentProjects => 0,
+                MainTab::Main => 0,
                 MainTab::Project(project_type) => match project_type {
                     ProjectType::Rust => 1,
                     ProjectType::Python => 2,
@@ -249,80 +257,64 @@ impl App for ProjectorApp {
         panel::TopBottomPanel::bottom("bottom_panel")
             .frame(Frame::new().stroke(Stroke::NONE))
             .show(ctx, |ui| {
-                set_style(ui.style_mut());
+                let frame_bottom = ui.available_rect_before_wrap().bottom();
                 ui.horizontal(|ui| {
-                    let (gear_rect, gear_btn) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::click());
-                    let gear_style = ui.style().visuals.widgets.style(&gear_btn);
-                    // ui.painter().rect(gear_rect, CornerRadius::ZERO, gear_style.bg_fill, gear_style.bg_stroke, StrokeKind::Inside);
-                    ui.painter().text(gear_rect.center(), Align2::CENTER_CENTER, crate::charcons::GEAR2, FontId::monospace(24.0), gear_style.text_color());
-                    if gear_btn.clicked() {
-                        self.dialog = ModalUi::settings(self.settings.clone());
-                    }
-                    gear_btn.on_hover_cursor(CursorIcon::PointingHand);
-                    if ui.button("Restart").clicked() {
-                        self.save_internal();
-                        ctx.send_viewport_cmd(ViewportCommand::Close);
-                        let curr_exe = std::env::current_exe().expect("Failed to get current exe.");
-                        std::process::Command::new(curr_exe).spawn().expect("Failed to spawn process.");
-                    }
-                    if ui.button("Exit").clicked() {
-                        ctx.send_viewport_cmd(ViewportCommand::Close);
-                    }
-                    if ui.button("Create Project").clicked() {
-                        self.dialog = ModalUi::ProjectWizard(ProjectWizard {
-
+                    menu::bar(ui, |ui| {
+                        let (gear_rect, gear_btn) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::click());
+                        let gear_style = ui.style().visuals.widgets.style(&gear_btn);
+                        ui.painter().text(gear_rect.center(), Align2::CENTER_CENTER, crate::charcons::GEAR2, FontId::monospace(24.0), gear_style.text_color());
+                        if gear_btn.clicked() {
+                            self.dialog = ModalUi::settings(self.settings.clone());
+                        }
+                        let gear_btn = gear_btn
+                            .on_hover_cursor(CursorIcon::PointingHand);
+                        gear_btn.context_menu(|ui| {
+                            if ui.button("General").clicked() {
+                                self.dialog = ModalUi::settings_tab(self.settings.clone(), SettingsTab::General);
+                                ui.close_menu();
+                            }
+                            if ui.button("Projects").clicked() {
+                                self.dialog = ModalUi::settings_tab(self.settings.clone(), SettingsTab::Projects);
+                                ui.close_menu();
+                            }
+                            if ui.button("Licenses").clicked() {
+                                self.dialog = ModalUi::settings_tab(self.settings.clone(), SettingsTab::Licenses);
+                                ui.close_menu();
+                            }
+                            if ui.button("Templates").clicked() {
+                                self.dialog = ModalUi::settings_tab(self.settings.clone(), SettingsTab::Templates);
+                                ui.close_menu();
+                            }
+                            if ui.button("Style").clicked() {
+                                self.dialog = ModalUi::settings_tab(self.settings.clone(), SettingsTab::Style);
+                                ui.close_menu();
+                            }
+                            ui.separator();
+                            if ui.button("Close").clicked() {
+                                ui.close_menu();
+                            }
                         });
-                    }
-                    ui.menu_button("Menu", |ui| {
-                        if ui.clicked("Restart") {
+
+                        if ui.button("Restart").clicked() {
                             self.save_internal();
                             ctx.send_viewport_cmd(ViewportCommand::Close);
                             let curr_exe = std::env::current_exe().expect("Failed to get current exe.");
                             std::process::Command::new(curr_exe).spawn().expect("Failed to spawn process.");
                         }
-                        if ui.clicked("Exit") {
+                        if ui.button("Exit").clicked() {
                             ctx.send_viewport_cmd(ViewportCommand::Close);
                         }
-                        ui.separator();
-                        if ui.clicked("Settings") {
-                            self.dialog = ModalUi::settings(self.settings.clone());
+                        if ui.button("Create Project").clicked() {
+                            self.dialog = ModalUi::ProjectWizard(ProjectWizard {
+
+                            });
                         }
                     });
-                    let menu_id = Id::new("menu_bar_popup_menu");
-                    let menu_btn = ui.button("Open Menu");
-                    if menu_btn.clicked() {
-                        ui.memory_mut(|mem| mem.toggle_popup(menu_id));
-                    }
-                    popup::popup_above_or_below_widget(
-                        ui,
-                        menu_id,
-                        &menu_btn,
-                        AboveOrBelow::Above,
-                        PopupCloseBehavior::CloseOnClickOutside,
-                        |ui| {
-                            if ui.button("Restart").clicked() {
-                                self.save_internal();
-                                ctx.send_viewport_cmd(ViewportCommand::Close);
-                                let curr_exe = std::env::current_exe().expect("Failed to get current exe.");
-                                std::process::Command::new(curr_exe).spawn().expect("Failed to spawn process.");
-                                ui.memory_mut(|mem| mem.close_popup());
-                            }
-                            if ui.button("Exit").clicked() {
-                                ctx.send_viewport_cmd(ViewportCommand::Close);
-                                ui.memory_mut(|mem| mem.close_popup());
-                            }
-                            ui.separator();
-                            if ui.button("Settings").clicked() {
-                                self.dialog = ModalUi::settings(self.settings.clone());
-                                ui.memory_mut(|mem| mem.close_popup());
-                            }
-                        }
-                    );
                 });
             });
-        CentralPanel::default().frame(Frame::new().inner_margin(0.0)).show(ctx, |ui| {
-            let mut close = false;
-            let mut closer = close.closer();
+        CentralPanel::default().frame(Frame::NONE).show(ctx, |ui| {
+            let close = OwnedCloser::new();
+            let mut closer = close.make_closer();
             match &mut self.dialog {
                 ModalUi::None => (),
                 ModalUi::Settings(settings_dialog) => {
@@ -341,38 +333,41 @@ impl App for ProjectorApp {
                     );
                 }
             }
-            if close {
+            if close.is_closed() {
                 self.dialog.close();
             }
-            // ui.style_mut().spacing.window_margin = Margin::ZERO;
-            // ui.style_mut().spacing.menu_margin = Margin::ZERO;
-            set_style(ui.style_mut());
-            let tabs = &[
-                Tab::new("Recent", MainTab::RecentProjects),
+            const TABS: &[Tab<'static, MainTab>] = &[
+                Tab::new("Main", MainTab::Main),
                 Tab::new("Rust", MainTab::Project(ProjectType::Rust)),
                 Tab::new("Python", MainTab::Project(ProjectType::Python)),
                 Tab::new("Web", MainTab::Project(ProjectType::Web)),
                 Tab::new("Other", MainTab::Project(ProjectType::Other)),
                 Tab::new("Text", MainTab::Text),
             ];
-            // menu::bar(ui, |ui| {
-            //     ui.small_button("Settings");
-            // });
             let mut tab_index = self.tab_index;
-            dgui::tabs::Tabs::new(&mut tab_index, tabs)
+            dgui::tabs::Tabs::new(&mut tab_index, TABS)
                 .with_size_mode(self.settings.style.tab_size_mode)
                 .with_text_align(Align::Center)
                 .show(ui, |index, tab, ui| {
-                    // ui.painter().rect_stroke(ui.max_rect(), CornerRadius::ZERO, Stroke::new(2.0, Color32::RED), StrokeKind::Outside);
                     match tab {
-                        MainTab::RecentProjects => {
-                            // if ui.button("Add Directory").clicked() {
-                            //     if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                            //         self.persist.recent_projects.push_back(ProjectPath::Other(dir));
-                            //     }
-                            // }
+                        MainTab::Main => {
+                            if ui.button("Add Directory").clicked() {
+                                if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                                    self.persist.recent_projects.push_back(ProjectPath::Other(dir));
+                                }
+                            }
+                            ui.with_inner_margin(Margin { left: 16, right: 16, top: 16, bottom: 8 }, |ui| {
+                                menu::bar(ui, |ui| {
+                                    ui.menu_button(crate::charcons::PUSHPIN, |ui| {
+                                        if ui.clicked("Test") {
+                                            println!("Test");
+                                        }
+                                    });
+                                    ui.pin_btn(ui.spacing().interact_size.y, Color32::WHITE);
+                                });
+                            });
                             let recents_search = Frame::NONE
-                                .inner_margin(Margin { top: 8, left: 16, right: 16, bottom: 0 })
+                                .inner_margin(Margin { top: 0, left: 16, right: 16, bottom: 0 })
                                 .show(ui, |ui| {
                                     Frame::NONE
                                     .stroke(Stroke::new(1.0, Color32::WHITE))
@@ -386,9 +381,7 @@ impl App for ProjectorApp {
                             ScrollArea::new(Vec2b::new(false, true))
                             .auto_shrink(Vec2b::FALSE)
                             .show(ui, |ui| {
-                                Frame::NONE
-                                .inner_margin(Margin { top: 0, left: 16, right: 16, bottom: 0 })
-                                .show(ui, |ui| {
+                                ui.with_inner_margin(Margin::symmetric(16, 0), |ui| {
                                     ui.spacing_mut().item_spacing = Vec2::ZERO;
                                     let mut open_editor_toggle = self.runtime.recent_project_context.open_editor;
                                     let mut open_shell_toggle = self.runtime.recent_project_context.open_shell;
@@ -412,66 +405,63 @@ impl App for ProjectorApp {
                                             open_explorer_toggle = false;
                                         }
                                         recent_resp.context_menu(|ui| {
-                                            set_style(ui.style_mut());
-                                            if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-                                                ui.label(format!("{}", name));
-                                            } else {
-                                                ui.colored_label(Color32::RED, "<invalid>");
-                                            }
-
-                                            // ui.separator();
-
-                                            
-                                            if ui.button("Close Menu").clicked() {
-                                                ui.close_menu();
-                                            }
+                                            ui.horizontal(|ui| {
+                                                let close_resp = ui.button("❎");
+                                                if close_resp.clicked() {
+                                                    ui.close_menu();
+                                                }
+                                                close_resp.on_hover_text("Close Menu");
+                                                if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+                                                    ui.add(Label::new(format!("{}", name))
+                                                        .halign(Align::Center).selectable(false));
+                                                } else {
+                                                    ui.colored_label(Color32::RED, "<invalid>");
+                                                }
+                                            });
 
                                             ui.separator();
                                             
                                             let mut exec_actions = false;
 
                                             let reveal_in_explorer = ui.add(
-                                                Button::new("Reveal in File Explorer")
+                                                Button::new("🗀 Reveal in File Explorer")
                                                     .corner_radius(CornerRadius::ZERO)
                                                     .selected(open_explorer_toggle)
                                             );
                                             if reveal_in_explorer.secondary_clicked() {
                                                 open_explorer_toggle.toggle();
-                                            }
-                                            if reveal_in_explorer.clicked() {
+                                            } else if reveal_in_explorer.clicked() {
                                                 open_explorer_toggle = true;
                                                 exec_actions = true;
                                             }
                                             reveal_in_explorer.on_hover_text(&self.settings.general.explorer_command);
                                             
                                             let open_terminal_here = ui.add(
-                                                Button::new("Open Terminal Here")
+                                                Button::new("🗖 Open Terminal Here")
                                                     .corner_radius(CornerRadius::ZERO)
                                                     .selected(open_shell_toggle)
                                             );
                                             if open_terminal_here.secondary_clicked() {
                                                 open_shell_toggle.toggle();
-                                            }
-                                            if open_terminal_here.clicked() {
+                                            } else if open_terminal_here.clicked() {
                                                 open_shell_toggle = true;
                                                 exec_actions = true;
                                             }
                                             open_terminal_here.on_hover_text(&self.settings.general.shell_command);
 
                                             let open_in_editor = ui.add(
-                                                Button::new("Open in Editor")
+                                                Button::new("✏ Open in Editor")
                                                     .corner_radius(CornerRadius::ZERO)
                                                     .selected(open_editor_toggle)
                                             );
                                             if open_in_editor.secondary_clicked() {
                                                 open_editor_toggle.toggle();
-                                            }
-                                            if open_in_editor.clicked() {
+                                            }else if open_in_editor.clicked() {
                                                 open_editor_toggle = true;
                                                 exec_actions = true;
                                             }
                                             open_in_editor.on_hover_text(&self.settings.general.editor_command);
-
+                                            
                                             if exec_actions {
                                                 if open_editor_toggle {
                                                     self.open_in_editor(path);
@@ -486,13 +476,13 @@ impl App for ProjectorApp {
                                             }
                                             ui.separator();
 
-                                            if ui.button("Copy Path").clicked() {
+                                            if ui.button("🗐 Copy Path").clicked() {
                                                 ui.ctx().copy_text(format!("{}", path.display()));
                                                 ui.close_menu();
                                             }
                                             ui.separator();
 
-                                            if ui.clicked("Remove") {
+                                            if ui.clicked("🗑 Remove") {
                                                 remove_index.replace(index);
                                                 ui.close_menu();
                                             }
@@ -512,26 +502,16 @@ impl App for ProjectorApp {
                                         open_explorer: open_explorer_toggle,
                                     };
                                 });
+                                // Frame::NONE
+                                // .inner_margin(Margin::symmetric(16, 0))
+                                // .show(ui, |ui| {
+
+                                // });
                             });
                         }
                         MainTab::Project(ProjectType::Rust) => {
-                            ui.with_layout(Layout::top_down(Align::Center), |ui| {
-                                let text = if self.runtime.recent_project_context.open_editor {
-                                    crate::charcons::STAR_FILLED
-                                } else {
-                                    crate::charcons::STAR_STROKE
-                                };
-                                if ui.clicked(text) {
-                                    self.runtime.recent_project_context.open_editor.toggle();
-                                }
-                                Grid::new("rust_project_tab_grid")
-                                .num_columns(2)
-                                .min_col_width(250.0)
-                                .show(ui, |ui| {
-                                    ui.rtl_label(Align::Center, "Test Button");
-                                    ui.button("Test Button");
-                                    ui.end_row();
-                                });
+                            ui.with_inner_margin(Margin::same(16), |ui| {
+                                
                             });
                         }
                         MainTab::Project(ProjectType::Python) => {
@@ -540,8 +520,7 @@ impl App for ProjectorApp {
                             // fn cont<F: FnOnce(&mut Ui) -> Response>(add_contents: F) -> F {
                             //     add_contents
                             // }
-                            ui.spacing_mut().menu_margin = Margin::ZERO;
-                            ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
+                            ui.with_inner_margin(Margin::same(16), |ui| {
                                 ui.spacing_mut().item_spacing = Vec2::ZERO;
                                 let (btn_rect, btn) = ui.allocate_exact_size(vec2(100.0, 24.0), Sense::click());
                                 let style = ui.style().visuals.widgets.style(&btn);

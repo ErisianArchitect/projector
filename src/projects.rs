@@ -37,26 +37,31 @@ pub enum ProjectPath {
 }
 
 impl ProjectPath {
+    #[must_use]
     #[inline]
     pub fn rust<P: Into<PathBuf>>(path: P) -> Self {
         Self::Rust(path.into())
     }
 
+    #[must_use]
     #[inline]
     pub fn python<P: Into<PathBuf>>(path: P) -> Self {
         Self::Python(path.into())
     }
 
+    #[must_use]
     #[inline]
     pub fn web<P: Into<PathBuf>>(path: P) -> Self {
         Self::Web(path.into())
     }
 
+    #[must_use]
     #[inline]
     pub fn other<P: Into<PathBuf>>(path: P) -> Self {
         Self::Other(path.into())
     }
 
+    #[must_use]
     #[inline]
     pub const fn project_type(&self) -> ProjectType {
         match self {
@@ -67,6 +72,7 @@ impl ProjectPath {
         }
     }
 
+    #[must_use]
     #[inline]
     pub fn path(&self) -> &Path {
         match self {
@@ -77,6 +83,7 @@ impl ProjectPath {
         }
     }
 
+    #[must_use]
     #[inline]
     pub fn take_inner(self) -> PathBuf {
         match self {
@@ -113,7 +120,7 @@ impl std::ops::Deref for ProjectPath {
     }
 }
 
-impl std::borrow::Borrow<Path> for ProjectPath {
+impl Borrow<Path> for ProjectPath {
     #[inline]
     fn borrow(&self) -> &Path {
         self.as_ref()
@@ -121,13 +128,9 @@ impl std::borrow::Borrow<Path> for ProjectPath {
 }
 
 impl Into<PathBuf> for ProjectPath {
+    #[inline]
     fn into(self) -> PathBuf {
-        match self {
-            ProjectPath::Rust(path_buf) => path_buf,
-            ProjectPath::Python(path_buf) => path_buf,
-            ProjectPath::Web(path_buf) => path_buf,
-            ProjectPath::Other(path_buf) => path_buf,
-        }
+        self.take_inner()
     }
 }
 

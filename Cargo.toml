@@ -1,13 +1,13 @@
 [package]
 name = "projector"
-version = "0.1.0"
+version = "0.1.0-indev"
 edition = "2021"
 description = "A simple personalized project opener/creator."
 repository = "https://github.com/ErisianArchitect/projector"
 
 [dependencies]
 bincode = { version = "2.0.1", features = ["derive"] }
-chrono = "0.4.41"
+chrono = { version = "0.4.41", features = ["serde"] }
 directories = "6.0.0"
 eframe = { version = "0.31.1", features = ["persistence"] }
 libc = "0.2.174"
