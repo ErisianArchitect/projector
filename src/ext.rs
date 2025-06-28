@@ -14,7 +14,7 @@ pub trait UiExt {
     fn toggle_box(&mut self, toggle: &mut bool) -> Response;
     fn clicked(&mut self, text: impl Into<WidgetText>) -> bool;
     fn pin_btn(&mut self, size: f32, color: Color32) -> Response;
-    fn with_inner_margin<R, F>(&mut self, margin: impl Into<Margin>, add_contents: F) -> InnerResponse<R>
+    fn with_inner_margin<R, F>(&mut self, inner_margin: impl Into<Margin>, add_contents: F) -> InnerResponse<R>
     where F: FnOnce(&mut Ui) -> R;
     fn right_to_left<R, F>(&mut self, align: Align, add_contents: F) -> InnerResponse<R>
     where F: FnOnce(&mut Ui) -> R;
@@ -135,9 +135,12 @@ impl UiExt for Ui {
     fn with_inner_margin<R, F>(&mut self, inner_margin: impl Into<Margin>, add_contents: F) -> InnerResponse<R>
     where F: FnOnce(&mut Ui) -> R {
         let margin: Margin = inner_margin.into();
-        Frame::NONE
-        .inner_margin(margin)
-        .show(self, add_contents)
+        let maxrect = self.available_rect_before_wrap();
+        let inner_rect = maxrect - margin;
+        let resp = self.allocate_new_ui(UiBuilder::new().max_rect(inner_rect), add_contents);
+        let expand_rect = resp.response.rect + margin;
+        self.advance_cursor_after_rect(expand_rect);
+        resp
     }
 
     #[inline]

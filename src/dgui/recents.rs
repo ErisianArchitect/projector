@@ -1,7 +1,6 @@
 
 use std::{
-    cmp::Ordering,
-    path::{Path, PathBuf},
+    cmp::Ordering, collections::HashMap, ops::Index, path::{Path, PathBuf}
 };
 
 use chrono::Timelike;
@@ -26,10 +25,8 @@ pub enum Recency {
 }
 
 #[repr(u8)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, bincode::Encode, bincode::Decode)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, bincode::Encode, bincode::Decode)]
 pub enum RecentsSort {
-    #[default]
-    Default,
     NameAscending,
     NameDescending,
     MostRecent,
@@ -37,39 +34,70 @@ pub enum RecentsSort {
 }
 
 impl RecentsSort {
-    pub fn default_sort(lhs: (usize, &RecentEntry), rhs: (usize, &RecentEntry)) -> Ordering {
-        let lhs = lhs.0;
-        let rhs = rhs.0;
-        lhs.cmp(&rhs)
+    // pub fn default_sort(lhs: (usize, &RecentEntry), rhs: (usize, &RecentEntry)) -> Ordering {
+    //     let lhs = lhs.0;
+    //     let rhs = rhs.0;
+    //     lhs.cmp(&rhs)
+    // }
+    #[inline]
+    pub const fn is_time_based(self) -> bool {
+        matches!(self, Self::MostRecent | Self::LeastRecent)
     }
 
-    pub fn ascending_name_sort(lhs: (usize, &RecentEntry), rhs: (usize, &RecentEntry)) -> Ordering {
-        let lhs = lhs.1.path.file_name().and_then(std::ffi::OsStr::to_str).unwrap_or("");
-        let rhs = rhs.1.path.file_name().and_then(std::ffi::OsStr::to_str).unwrap_or("");
+    #[inline]
+    pub const fn is_name_based(self) -> bool {
+        matches!(self, Self::NameAscending | Self::NameDescending)
+    }
+
+    #[inline]
+    fn make_search_fn<'a, 'b: 'a>(find: &'b RecentEntry, sorter: fn(&RecentEntry, &RecentEntry) -> Ordering) -> impl FnMut(&'a RecentEntry) -> Ordering {
+        move |entry: &'a RecentEntry| {
+            sorter(entry, find)
+        }
+    }
+
+    fn ascending_name_sort(lhs: &RecentEntry, rhs: &RecentEntry) -> Ordering {
+        let lhs = lhs.path.file_name().and_then(std::ffi::OsStr::to_str).unwrap_or("");
+        let rhs = rhs.path.file_name().and_then(std::ffi::OsStr::to_str).unwrap_or("");
         lhs.cmp(rhs)
     }
 
-    pub fn descending_name_sort(lhs: (usize, &RecentEntry), rhs: (usize, &RecentEntry)) -> Ordering {
-        let lhs = lhs.1.path.file_name().and_then(std::ffi::OsStr::to_str).unwrap_or("");
-        let rhs = rhs.1.path.file_name().and_then(std::ffi::OsStr::to_str).unwrap_or("");
+    fn ascending_name_search<'a, 'b: 'a>(find: &'b RecentEntry) -> impl FnMut(&'a RecentEntry) -> Ordering {
+        Self::make_search_fn(find, Self::ascending_name_sort)
+    }
+
+    fn descending_name_sort(lhs: &RecentEntry, rhs: &RecentEntry) -> Ordering {
+        let lhs = lhs.path.file_name().and_then(std::ffi::OsStr::to_str).unwrap_or("");
+        let rhs = rhs.path.file_name().and_then(std::ffi::OsStr::to_str).unwrap_or("");
         rhs.cmp(lhs)
     }
 
-    pub fn most_recent_sort(lhs: (usize, &RecentEntry), rhs: (usize, &RecentEntry)) -> Ordering {
-        let lhs = &lhs.1.time;
-        let rhs = &rhs.1.time;
+    fn descending_name_search<'a, 'b: 'a>(find: &'b RecentEntry) -> impl FnMut(&'a RecentEntry) -> Ordering {
+        Self::make_search_fn(find, Self::descending_name_sort)
+    }
+
+    fn most_recent_sort(lhs: &RecentEntry, rhs: &RecentEntry) -> Ordering {
+        let lhs = &lhs.last_open_time;
+        let rhs = &rhs.last_open_time;
         rhs.cmp(lhs)
     }
 
-    pub fn least_recent_sort(lhs: (usize, &RecentEntry), rhs: (usize, &RecentEntry)) -> Ordering {
-        let lhs = &lhs.1.time;
-        let rhs = &rhs.1.time;
+    fn most_recent_search<'a, 'b: 'a>(find: &'b RecentEntry) -> impl FnMut(&'a RecentEntry) -> Ordering {
+        Self::make_search_fn(find, Self::most_recent_sort)
+    }
+
+    fn least_recent_sort(lhs: &RecentEntry, rhs: &RecentEntry) -> Ordering {
+        let lhs = &lhs.last_open_time;
+        let rhs = &rhs.last_open_time;
         lhs.cmp(rhs)
     }
 
-    pub fn sort_by_fn(self) -> fn((usize, &RecentEntry), (usize, &RecentEntry)) -> Ordering {
+    fn least_recent_search<'a, 'b: 'a>(find: &'b RecentEntry) -> impl FnMut(&'a RecentEntry) -> Ordering {
+        Self::make_search_fn(find, Self::least_recent_sort)
+    }
+
+    fn sort_by_fn(self) -> fn(&RecentEntry, &RecentEntry) -> Ordering {
         match self {
-            RecentsSort::Default => Self::default_sort,
             RecentsSort::NameAscending => Self::ascending_name_sort,
             RecentsSort::NameDescending => Self::descending_name_sort,
             RecentsSort::MostRecent => Self::most_recent_sort,
@@ -82,12 +110,76 @@ impl RecentsSort {
         order.sort_by(move |&lhs, &rhs| {
             let l_index = lhs as usize;
             let r_index = rhs as usize;
-            let l_obj = &recents[l_index];
-            let r_obj = &recents[r_index];
-            let lhs = (l_index, l_obj);
-            let rhs = (r_index, r_obj);
-            sort_by(lhs, rhs)
+            let l_entry = &recents[l_index];
+            let r_entry = &recents[r_index];
+            sort_by(l_entry, r_entry)
         });
+    }
+
+    pub fn partition_point(self, recents: &[RecentEntry], order: &[u16], find: &RecentEntry) -> usize {
+        match self {
+            RecentsSort::NameAscending => {
+                let mut search = Self::ascending_name_search(find);
+                order.partition_point(move |&index| {
+                    let entry = &recents[index as usize];
+                    search(entry) != Ordering::Greater
+                })
+            },
+            RecentsSort::NameDescending => {
+                let mut search = Self::descending_name_search(find);
+                order.partition_point(move |&index| {
+                    let entry = &recents[index as usize];
+                    search(entry) != Ordering::Greater
+                })
+            },
+            RecentsSort::MostRecent => {
+                let mut search = Self::most_recent_search(find);
+                order.partition_point(move |&index| {
+                    let entry = &recents[index as usize];
+                    search(entry) != Ordering::Greater
+                })
+            },
+            RecentsSort::LeastRecent => {
+                let mut search = Self::least_recent_search(find);
+                order.partition_point(move |&index| {
+                    let entry = &recents[index as usize];
+                    search(entry) != Ordering::Greater
+                })
+            },
+        }
+    }
+
+    pub fn search(self, recents: &[RecentEntry], order: &[u16], find: &RecentEntry) -> Result<usize, usize> {
+        match self {
+            RecentsSort::NameAscending => {
+                let mut search = Self::ascending_name_search(find);
+                order.binary_search_by(move |&index| {
+                    let entry = &recents[index as usize];
+                    search(entry)
+                })
+            },
+            RecentsSort::NameDescending => {
+                let mut search = Self::descending_name_search(find);
+                order.binary_search_by(move |&index| {
+                    let entry = &recents[index as usize];
+                    search(entry)
+                })
+            },
+            RecentsSort::MostRecent => {
+                let mut search = Self::most_recent_search(find);
+                order.binary_search_by(move |&index| {
+                    let entry = &recents[index as usize];
+                    search(entry)
+                })
+            },
+            RecentsSort::LeastRecent => {
+                let mut search = Self::least_recent_search(find);
+                order.binary_search_by(move |&index| {
+                    let entry = &recents[index as usize];
+                    search(entry)
+                })
+            },
+        }
     }
 }
 
@@ -166,7 +258,7 @@ impl RecentEntryTimeCurry {
     pub fn with(self, path: ProjectPath) -> RecentEntry {
         RecentEntry {
             path,
-            time: self.time,
+            last_open_time: self.time,
         }
     }
 
@@ -174,7 +266,7 @@ impl RecentEntryTimeCurry {
     pub fn rust<P: Into<PathBuf>>(self, path: P) -> RecentEntry {
         RecentEntry {
             path: ProjectPath::Rust(path.into()),
-            time: self.time,
+            last_open_time: self.time,
         }
     }
 
@@ -182,7 +274,7 @@ impl RecentEntryTimeCurry {
     pub fn python<P: Into<PathBuf>>(self, path: P) -> RecentEntry {
         RecentEntry {
             path: ProjectPath::Python(path.into()),
-            time: self.time,
+            last_open_time: self.time,
         }
     }
 
@@ -190,7 +282,7 @@ impl RecentEntryTimeCurry {
     pub fn web<P: Into<PathBuf>>(self, path: P) -> RecentEntry {
         RecentEntry {
             path: ProjectPath::Python(path.into()),
-            time: self.time,
+            last_open_time: self.time,
         }
     }
 
@@ -198,7 +290,7 @@ impl RecentEntryTimeCurry {
     pub fn other<P: Into<PathBuf>>(self, path: P) -> RecentEntry {
         RecentEntry {
             path: ProjectPath::Other(path.into()),
-            time: self.time,
+            last_open_time: self.time,
         }
     }
 }
@@ -206,7 +298,7 @@ impl RecentEntryTimeCurry {
 #[derive(Debug, Clone)]
 pub struct RecentEntry {
     path: ProjectPath,
-    time: chrono::DateTime<chrono::Utc>,
+    last_open_time: chrono::DateTime<chrono::Utc>,
 }
 
 impl RecentEntry {
@@ -221,7 +313,7 @@ impl RecentEntry {
     pub fn now(path: ProjectPath) -> Self {
         Self {
             path,
-            time: chrono::Utc::now(),
+            last_open_time: chrono::Utc::now(),
         }
     }
 
@@ -230,7 +322,7 @@ impl RecentEntry {
     pub fn new(path: ProjectPath, time: chrono::DateTime<chrono::Utc>) -> Self {
         Self {
             path,
-            time,
+            last_open_time: time,
         }
     }
 }
@@ -238,10 +330,8 @@ impl RecentEntry {
 impl bincode::Encode for RecentEntry {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
         self.path.encode(encoder)?;
-        // let time: SystemTime = self.time.into();
-        // time.encode(encoder)
-        let seconds = self.time.timestamp();
-        let nsecs = self.time.timestamp_subsec_nanos();
+        let seconds = self.last_open_time.timestamp();
+        let nsecs = self.last_open_time.timestamp_subsec_nanos();
         seconds.encode(encoder)?;
         nsecs.encode(encoder)
     }
@@ -254,7 +344,7 @@ impl<Ctx> bincode::Decode<Ctx> for RecentEntry {
         let nsecs = u32::decode(decoder)?;
         Ok(Self {
             path,
-            time: chrono::DateTime::from_timestamp(seconds, nsecs).unwrap_or_default(),
+            last_open_time: chrono::DateTime::from_timestamp(seconds, nsecs).unwrap_or_default(),
         })
     }
 }
@@ -272,11 +362,13 @@ pub struct Recents {
 }
 
 impl Recents {
-    pub fn new(recents: Vec<RecentEntry>) -> Self {
+    pub fn new(recents: Vec<RecentEntry>, sort: RecentsSort) -> Self {
+        let mut order: Vec<u16> = (0..recents.len()).map(|i| i as u16).collect();
+        sort.sort(recents.as_slice(), order.as_mut_slice());
         Self {
-            order: (0..recents.len()).map(|i| i as u16).collect(),
+            order,
             recents,
-            sort: RecentsSort::Default,
+            sort,
         }
     }
 
@@ -305,6 +397,61 @@ impl Recents {
         };
         self.set_sort(sort);
     }
+
+    #[inline]
+    pub const fn sort(&self) -> RecentsSort {
+        self.sort
+    }
+
+    #[inline]
+    pub const fn len(&self) -> usize {
+        self.order.len()
+    }
+
+    /// Sets the entry's time to Utc::now() then bumps it in the order if the order depends on the time.
+    #[inline]
+    pub fn bump(&mut self, index: usize) {
+        // Bumps the time for an entry, and may move it in the order if the sort is time based.
+        self.recents[self.order[index] as usize].last_open_time = chrono::Utc::now();
+        if matches!(self.sort, RecentsSort::MostRecent | RecentsSort::LeastRecent) {
+            let recent_index = self.order.remove(index);
+            let entry = &self.recents[recent_index as usize];
+            let Err(insert_index) = self.sort.search(&self.recents, &self.order, entry) else {
+                panic!("Entry should not have been found.");
+            };
+            self.order.insert(insert_index, recent_index);
+        }
+    }
+
+    /// Finds the index in the `self.order` list where the index to this path exists in `self.recents` or returns None if it doesn't exist.
+    /// This is a linear search because each path needs to be checked individually.
+    fn order_entry_index(&self, path: &Path) -> Option<usize> {
+        self.order.iter().cloned().enumerate().find_map(move |(i, entry_index)| {
+            let entry = &self.recents[entry_index as usize];
+            if same_file::is_same_file(path, &entry.path).unwrap_or(false) {
+                Some(i)
+            } else {
+                None
+            }
+        })
+    }
+
+    #[inline]
+    pub fn push_now(&mut self, path: ProjectPath) {
+        if let Some(entry_index) = self.order_entry_index(&path) {
+            self.bump(entry_index);
+            return;
+        }
+        let entry = RecentEntry::now(path);
+        let index = self.recents.len();
+        let insert_index = self.sort.search(&self.recents, &self.order, &entry);
+        let insert_index = match insert_index {
+            Ok(index) => index,
+            Err(index) => index,
+        };
+        self.recents.push(entry);
+        self.order.insert(insert_index, index as u16);
+    }
 }
 
 impl std::ops::Index<usize> for Recents {
@@ -316,7 +463,8 @@ impl std::ops::Index<usize> for Recents {
     }
 }
 
-impl bincode::Encode for Recents {
+impl
+ bincode::Encode for Recents {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
         self.recents.encode(encoder)
     }
@@ -324,14 +472,47 @@ impl bincode::Encode for Recents {
 
 impl<Ctx> bincode::Decode<Ctx> for Recents {
     fn decode<D: bincode::de::Decoder<Context = Ctx>>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError> {
-        let recents = Vec::<RecentEntry>::decode(decoder)?;
-        let order = (0..recents.len()).map(|i| i as u16).collect::<Vec<_>>();
-        Ok(Self {
-            recents,
-            order,
-            // It doesn't make sense to me to persist the sort, so it won't be persisted.
-            sort: RecentsSort::Default,
-        })
+        Ok(Self::new(
+            Vec::<RecentEntry>::decode(decoder)?,
+            RecentsSort::MostRecent,
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SEP: &'static str = "********************************";
+    fn sep() {
+        println!("{}", SEP);
+    }
+
+    #[test]
+    fn recents_test() {
+        sep();
+        let mut recents = Recents::new(vec![], RecentsSort::NameAscending);
+        println!("{:?}", recents.sort);
+        recents.push_now(ProjectPath::other("./ignore/a.txt"));
+        recents.push_now(ProjectPath::other("./ignore/c.txt"));
+        recents.push_now(ProjectPath::other("./ignore/b.txt"));
+        fn print_recents(recents: &Recents) {
+            for i in 0..recents.len() {
+                let entry = &recents[i];
+                println!("{}", entry.path.display());
+            }
+        }
+        print_recents(&recents);
+        sep();
+        let start = crate::util::time::Stopwatch::start();
+        recents.set_sort(RecentsSort::LeastRecent);
+        let elapsed = start.elapsed();
+        println!("Sorted in {:?}", elapsed);
+        println!("{:?}", recents.sort);
+        recents.push_now(ProjectPath::other("./ignore/d.txt"));
+        recents.push_now(ProjectPath::other("./ignore/a.txt"));
+        print_recents(&recents);
+        sep();
     }
 }
 

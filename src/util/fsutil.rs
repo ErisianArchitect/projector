@@ -35,16 +35,6 @@ pub fn utc_modified_time<P: AsRef<Path>>(path: P) -> std::io::Result<DateTime<Ut
     modified_time(path.as_ref())
 }
 
-/// Determines if two paths point to the same location in the file system.
-/// 
-/// This will canonicalize the paths then compare them.
-#[inline]
-pub fn is_same_path<PL: AsRef<Path>, PR: AsRef<Path>>(lhs: PL, rhs: PL) -> std::io::Result<bool> {
-    let lhs = lhs.as_ref().canonicalize()?;
-    let rhs = rhs.as_ref().canonicalize()?;
-    Ok(lhs == rhs)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

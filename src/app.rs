@@ -368,7 +368,7 @@ impl App for ProjectorApp {
                             });
                             let spacing = ui.spacing_mut().item_spacing.replace(vec2(0.0, 0.0));
                             let recents_search = Frame::NONE
-                                .inner_margin(Margin { top: 0, left: 16, right: 16, bottom: 0 })
+                                .inner_margin(Margin { top: 0, bottom: 0, left: 16, right: 16 })
                                 .show(ui, |ui| {
                                     Frame::NONE
                                     .stroke(Stroke::new(1.0, Color32::WHITE))
@@ -379,7 +379,8 @@ impl App for ProjectorApp {
                                             .show(ui)
                                     }).inner;
                                 });
-                            ui.with_inner_margin(Margin { top: 0, bottom: 8, left: 0, right: 0 }, |ui| {
+                            ui.with_inner_margin(Margin { top: 0, bottom: 4, left: 0, right: 0 }, |ui| {
+                                ui.set_clip_rect(ui.available_rect_before_wrap());
                                 ScrollArea::new(Vec2b::new(false, true))
                                 .auto_shrink(Vec2b::FALSE)
                                 .show(ui, |ui| {

@@ -198,7 +198,7 @@ impl RepeatTimer {
     }
 
     #[inline]
-    pub fn finished(self) -> bool {
+    pub fn finished(&self) -> bool {
         Instant::now() >= self.current_deadline
     }
 

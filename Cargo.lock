@@ -2635,6 +2635,7 @@ dependencies = [
  "notify",
  "rfd",
  "run_script",
+ "same-file",
  "strfmt",
  "tempfile",
  "thiserror 2.0.12",

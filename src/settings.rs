@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}, sync::atomic::{AtomicBool, Ordering}};
+use std::{path::{Path, PathBuf}, sync::atomic::{AtomicBool, Ordering}, time::Duration};
 use eframe::{
     egui::{self, *},
 };
@@ -7,7 +7,7 @@ use crate::{
     app::{
         MainTab, ModalUi,
     }, appdata::AppData, dgui::tabs::{Tab, TabSizeMode, Tabs}, ext::{Replace, UiExt}, projects::ProjectType, util::{
-        alt::Alternator, marker::*
+        alt::Alternator, marker::*, time::RepeatTimer
     }
 };
 
@@ -311,6 +311,7 @@ pub struct SettingsDialog {
     pub projects_gui: ProjectsGui,
     pub style_gui: StyleGui,
     pub counter: u64,
+    pub timer: RepeatTimer,
 }
 
 pub struct SettingsDialogResponse {
@@ -320,28 +321,13 @@ pub struct SettingsDialogResponse {
 
 impl SettingsDialog {
     pub fn from_settings(settings: Settings) -> Self {
-        Self {
-            counter: 0,
-            settings_copy: settings,
-            settings_tab_index: 0,
-            edit_state: EditState::Unaltered,
-            request_close: false,
-            general_gui: GeneralGui {
-
-            },
-            projects_gui: ProjectsGui {
-                // projects_tab: ProjectType::Rust,
-                tab_index: 0,
-            },
-            style_gui: StyleGui {
-
-            }
-        }
+        Self::from_settings_tab(settings, SettingsTab::General)
     }
 
     pub fn from_settings_tab(settings: Settings, tab: SettingsTab) -> Self {
         Self {
             counter: 0,
+            timer: RepeatTimer::wait_millis(1000),
             settings_copy: settings,
             settings_tab_index: tab.tab_index(),
             edit_state: EditState::Unaltered,
@@ -380,13 +366,11 @@ impl SettingsDialog {
         let save = ui.input_mut(|input| {
             input.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL, Key::S))
         });
-        if save {
-            if self.edit_state.needs_update() {
-                if let Ok(_) = apply_settings(original_settings, &self.settings_copy, app_data) {
-                    self.edit_state = EditState::Synced;
-                } else {
-                    eprintln!("Failed to save settings.");
-                }
+        if save && self.edit_state.needs_update() {
+            if let Ok(_) = apply_settings(original_settings, &self.settings_copy, app_data) {
+                self.edit_state = EditState::Synced;
+            } else {
+                eprintln!("Failed to save settings.");
             }
         }
         let change_marker = marker();
@@ -479,7 +463,10 @@ impl SettingsDialog {
                         // ui.painter().rect_filled(inner_rect, CornerRadius::ZERO, Color32::LIGHT_GRAY);
                         menu::bar(ui, |ui| {
                             ui.right_to_left(Align::Center, |ui| {
-                                self.counter += 1;
+                                self.timer.on_tick(|_, _| {
+                                    self.counter += 1;
+                                });
+                                ui.ctx().request_repaint_after(Duration::from_millis(1000));
                                 let counter = self.counter;
                                 let test_label = Label::new(format!("{counter}")).selectable(false);
                                 ui.add(test_label);
@@ -490,7 +477,7 @@ impl SettingsDialog {
                                     let close_btn = ui.button("Close");
                                     if esc_pressed || close_btn.clicked() {
                                         if self.edit_state.needs_update() {
-                                            self.request_close = true;
+                                            self.request_close();
                                         } else {
                                             closer.close();
                                         }
@@ -524,7 +511,7 @@ impl SettingsDialog {
                                             }
                                             ui.separator();
                                             let modified_label = Label::new("Modified")
-                                                .halign(Align::Center)
+                                                // .halign(Align::Center)
                                                 .selectable(false);
                                             ui.add(modified_label);
                                         },
@@ -532,7 +519,7 @@ impl SettingsDialog {
                                         EditState::Synced => {
                                             ui.separator();
                                             let synced_label = Label::new("Synced")
-                                                .halign(Align::Center)
+                                                // .halign(Align::Center)
                                                 .selectable(false);
                                             ui.add(synced_label);
                                         },
