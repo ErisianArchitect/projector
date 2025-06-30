@@ -1,36 +1,18 @@
-use std::{ffi::{CStr, CString}, process::*};
+use std::process::*;
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExecError {
     #[error("Io Error: {0}")]
     IoError(#[from] std::io::Error),
+    #[error("Invalid command: {0}")]
+    InvalidCommand(String),
 }
 
-// This isn't actually as useful as I was hoping since it opens a terminal, which isn't what is wanted.
-pub fn system<S: AsRef<str>>(command: S) -> i32 {
-    fn inner(command: &str) -> i32 {
-        let c_str = CString::new(command).expect("Failed to create CString.");
-        unsafe {
-            libc::system(c_str.as_ptr())
-        }
-    }
-    inner(command.as_ref())
-}
-
-pub fn non_blocking_system<S: AsRef<str>>(command: S) {
-    fn inner(command: &str) {
-        let c_str = CString::new(command).expect("Failed to create CString.");
-        std::thread::spawn(move || {
-            unsafe {
-                libc::system(c_str.as_ptr());
-            }
-            drop(c_str);
-        });
-    }
-    inner(command.as_ref());
-}
-
-pub fn execute<S: AsRef<str>>(script: S) -> Result<ExitStatus, std::io::Error> {
+/// This function is a little janky. It creates a shell script as a side effect of execution.
+pub fn execute_shell_script<S: AsRef<str>>(script: S) -> Result<ExitStatus, std::io::Error> {
     #[inline]
     fn inner(script: &str) -> Result<ExitStatus, std::io::Error> {
         #[cfg(target_os = "windows")]
@@ -75,6 +57,42 @@ pub fn execute<S: AsRef<str>>(script: S) -> Result<ExitStatus, std::io::Error> {
     inner(script.as_ref())
 }
 
+/// Command must be a single line, and must be valid for the system shell (`cmd` on Windows, `sh` on Linux. Probably `sh` on MacOS, too,
+/// but I don't use MacOS, so you'll have to implement that yourself)
+pub fn shell_command<S: AsRef<str>>(command: S) -> Option<Command> {
+    fn inner(command: &str) -> Option<Command> {
+        let args = shlex::split(command)?;
+        #[cfg(target_os = "windows")]
+        {
+            let mut cmd = Command::new("cmd");
+            cmd.arg("/C");
+            cmd.args(&args);
+            cmd.creation_flags(1<<27);
+            Some(cmd)
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let mut cmd = Command::new("sh");
+            shell_command.arg("-c");
+            shell_command.args(&args);
+            Some(shell_command)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            unimplemented!("I didn't implement shell_command() for this target.");
+        }
+    }
+    inner(command.as_ref())
+}
+
+pub fn exec_shell<S: AsRef<str>>(command: S) -> Result<ExitStatus, ExecError> {
+    fn inner(command: &str) -> Result<ExitStatus, ExecError> {
+        let mut cmd = shell_command(command).ok_or_else(|| ExecError::InvalidCommand(command.to_owned()))?;
+        Ok(cmd.status()?)
+    }
+    inner(command.as_ref())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,6 +100,7 @@ mod tests {
     #[test]
     fn execute_test() {
         // execute("code run.bat").expect("Failed to execute.");
-        system(r#"code "C:\Users\derek\Documents\code\rust\bourne""#);
+        // system(r#"code "C:\Users\derek\Documents\code\rust\bourne""#);
+        exec_shell(r#"explorer.exe "." && echo test"#).expect("Failed to execute.");
     }
 }

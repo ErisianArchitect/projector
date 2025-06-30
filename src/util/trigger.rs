@@ -21,12 +21,12 @@ impl Trigger {
 
     #[inline]
     pub fn swap(&self, value: bool) -> bool {
-        self.trigger.swap(value, Ordering::Relaxed)
+        self.trigger.swap(value, Ordering::AcqRel)
     }
 
     #[inline]
     pub fn set(&self, value: bool) {
-        self.trigger.store(value, Ordering::Relaxed);
+        self.trigger.store(value, Ordering::Release);
     }
 
     #[inline]
@@ -41,7 +41,7 @@ impl Trigger {
 
     #[inline]
     pub fn is_active(&self) -> bool {
-        self.trigger.load(Ordering::Relaxed)
+        self.trigger.load(Ordering::Acquire)
     }
 
     #[inline]
@@ -77,12 +77,12 @@ impl<'a> AtomicTrigger<'a> {
 
     #[inline]
     pub fn swap(self, active: bool) -> bool {
-        self.trigger.swap(active, Ordering::Relaxed)
+        self.trigger.swap(active, Ordering::AcqRel)
     }
 
     #[inline]
     pub fn set(self, active: bool) {
-        self.trigger.store(active, Ordering::Relaxed);
+        self.trigger.store(active, Ordering::Release);
     }
 
     #[inline]
@@ -97,7 +97,7 @@ impl<'a> AtomicTrigger<'a> {
 
     #[inline]
     pub fn is_active(self) -> bool {
-        self.trigger.load(Ordering::Relaxed)
+        self.trigger.load(Ordering::Acquire)
     }
 
     #[inline]

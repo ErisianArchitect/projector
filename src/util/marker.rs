@@ -33,7 +33,7 @@ impl<'a> MarkerRef<'a> {
 
     #[inline]
     pub fn mark(self) -> bool {
-        !self.marker.swap(true, Ordering::Relaxed)
+        !self.marker.swap(true, Ordering::AcqRel)
     }
 
     #[inline]
@@ -49,12 +49,12 @@ impl<'a> MarkerRef<'a> {
 
     #[inline]
     pub fn reset(self) -> bool {
-        self.marker.swap(false, Ordering::Relaxed)
+        self.marker.swap(false, Ordering::AcqRel)
     }
 
     #[inline]
     pub fn is_marked(self) -> bool {
-        self.marker.load(Ordering::Relaxed)
+        self.marker.load(Ordering::Acquire)
     }
 
     #[inline]
@@ -109,7 +109,7 @@ impl Marker {
 
     #[inline]
     pub fn mark(&self) -> bool {
-        !self.marker.swap(true, Ordering::Relaxed)
+        !self.marker.swap(true, Ordering::AcqRel)
     }
 
     #[inline]
@@ -125,12 +125,12 @@ impl Marker {
 
     #[inline]
     pub fn reset(&self) -> bool {
-        self.marker.swap(false, Ordering::Relaxed)
+        self.marker.swap(false, Ordering::AcqRel)
     }
 
     #[inline]
     pub fn is_marked(&self) -> bool {
-        self.marker.load(Ordering::Relaxed)
+        self.marker.load(Ordering::Acquire)
     }
 
     #[inline]
@@ -160,7 +160,7 @@ impl ArcMarker {
 
     #[inline]
     pub fn mark(&self) -> bool {
-        !self.marker.swap(true, Ordering::Relaxed)
+        !self.marker.swap(true, Ordering::AcqRel)
     }
 
     #[inline]
@@ -176,12 +176,12 @@ impl ArcMarker {
 
     #[inline]
     pub fn reset(&self) -> bool {
-        self.marker.swap(false, Ordering::Relaxed)
+        self.marker.swap(false, Ordering::AcqRel)
     }
 
     #[inline]
     pub fn is_marked(&self) -> bool {
-        self.marker.load(Ordering::Relaxed)
+        self.marker.load(Ordering::Acquire)
     }
 
     #[inline]

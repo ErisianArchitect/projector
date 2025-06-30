@@ -416,11 +416,17 @@ impl Recents {
         if matches!(self.sort, RecentsSort::MostRecent | RecentsSort::LeastRecent) {
             let recent_index = self.order.remove(index);
             let entry = &self.recents[recent_index as usize];
-            let Err(insert_index) = self.sort.search(&self.recents, &self.order, entry) else {
-                panic!("Entry should not have been found.");
-            };
+            let insert_index = self.sort.partition_point(&self.recents, &self.order, entry);
             self.order.insert(insert_index, recent_index);
         }
+    }
+
+    #[inline]
+    pub fn remove(&mut self, index: usize) {
+        let recents_index = self.order.remove(index);
+        self.recents.remove(recents_index as usize);
+        // Adjust indices to account for the removed item.
+        self.order.iter_mut().for_each(move |index| if *index > recents_index { *index -= 1 });
     }
 
     /// Finds the index in the `self.order` list where the index to this path exists in `self.recents` or returns None if it doesn't exist.
@@ -436,7 +442,6 @@ impl Recents {
         })
     }
 
-    #[inline]
     pub fn push_now(&mut self, path: ProjectPath) {
         if let Some(entry_index) = self.order_entry_index(&path) {
             self.bump(entry_index);
@@ -444,13 +449,35 @@ impl Recents {
         }
         let entry = RecentEntry::now(path);
         let index = self.recents.len();
-        let insert_index = self.sort.search(&self.recents, &self.order, &entry);
-        let insert_index = match insert_index {
-            Ok(index) => index,
-            Err(index) => index,
-        };
+        let insert_index = self.sort.partition_point(&self.recents, &self.order, &entry);
         self.recents.push(entry);
         self.order.insert(insert_index, index as u16);
+    }
+
+    /// Purges all paths that are not found on the file system.
+    pub fn purge_not_found(&mut self) {
+        let purge_list = self.order.iter().enumerate().filter_map(|(i, &entry_index)| {
+            let entry = &self.recents[entry_index as usize];
+            if entry.path.exists() {
+                None
+            } else {
+                Some(i)
+            }
+        }).collect::<Vec<_>>();
+        for &purge_index in purge_list.iter().rev() {
+            self.remove(purge_index)
+        }
+    }
+
+    #[inline]
+    pub fn iter(&self) -> impl Iterator<Item = &RecentEntry> {
+        self.order.iter().map(move |&index| &self.recents[index as usize])
+    }
+
+    #[inline]
+    pub fn clear(&mut self) {
+        self.recents.clear();
+        self.order.clear();
     }
 }
 
@@ -463,8 +490,14 @@ impl std::ops::Index<usize> for Recents {
     }
 }
 
-impl
- bincode::Encode for Recents {
+impl std::ops::IndexMut<usize> for Recents {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        let entry_index = self.order[index] as usize;
+        &mut self.recents[entry_index]
+    }
+}
+
+impl bincode::Encode for Recents {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
         self.recents.encode(encoder)
     }
@@ -490,27 +523,23 @@ mod tests {
 
     #[test]
     fn recents_test() {
-        sep();
-        let mut recents = Recents::new(vec![], RecentsSort::NameAscending);
-        println!("{:?}", recents.sort);
-        recents.push_now(ProjectPath::other("./ignore/a.txt"));
-        recents.push_now(ProjectPath::other("./ignore/c.txt"));
-        recents.push_now(ProjectPath::other("./ignore/b.txt"));
         fn print_recents(recents: &Recents) {
             for i in 0..recents.len() {
                 let entry = &recents[i];
                 println!("{}", entry.path.display());
             }
         }
+        sep();
+        let mut recents = Recents::new(vec![], RecentsSort::LeastRecent);
+        println!("{:?}", recents.sort);
+        recents.push_now(ProjectPath::other("./ignore/sub/a.txt"));
+        recents.push_now(ProjectPath::other("./ignore/sub/b.txt"));
+        recents.push_now(ProjectPath::other("./ignore/a.txt"));
+        recents.push_now(ProjectPath::other("./ignore/c.txt"));
+        recents.push_now(ProjectPath::other("./ignore/b.txt"));
         print_recents(&recents);
         sep();
-        let start = crate::util::time::Stopwatch::start();
-        recents.set_sort(RecentsSort::LeastRecent);
-        let elapsed = start.elapsed();
-        println!("Sorted in {:?}", elapsed);
-        println!("{:?}", recents.sort);
-        recents.push_now(ProjectPath::other("./ignore/d.txt"));
-        recents.push_now(ProjectPath::other("./ignore/a.txt"));
+        recents.purge_not_found();
         print_recents(&recents);
         sep();
     }

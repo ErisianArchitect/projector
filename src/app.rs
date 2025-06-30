@@ -1,11 +1,11 @@
 #![allow(unused)]
 use std::{any, collections::VecDeque, io::Write, ops::BitOrAssign, os::windows::process::CommandExt, path::{
     Path, PathBuf,
-}, process::{Command, CommandArgs}, time::{Duration, Instant}};
+}, process::{Command, CommandArgs, ExitStatus}, time::{Duration, Instant}};
 use eframe::{
     egui::{self, Style, *}, epaint::tessellator::path, App, CreationContext
 };
-use crate::{appdata::AppData, dgui::recents::Recent, ext::{BoolExt, CloserBoolExt, Replace, UiExt}, project_wizard::ProjectWizard, projects::ProjectPath, util::marker::Marker};
+use crate::{appdata::AppData, dgui::{mbox::{centered_mbox_modal, MBox, MessageBox}, recents::Recent}, ext::{BoolExt, CloserAtomicBoolExt, Replace, UiExt}, project_wizard::ProjectWizard, projects::ProjectPath, util::{execute::ExecError, marker::Marker}};
 use crate::settings::*;
 
 use crate::{settings::Settings, dgui::{self, tabs::{Tab, TabSizeMode, Tabs}}, projects::ProjectType};
@@ -138,6 +138,7 @@ pub struct ProjectorApp {
     app_data: AppData,
     persist: Persist,
     runtime: Runtime,
+    message: MBox<ProjectorApp>,
 }
 
 impl ProjectorApp {
@@ -185,6 +186,48 @@ impl ProjectorApp {
             app_data,
             persist,
             runtime: Runtime::default(),
+            // message: Some(Box::new(|app: &mut ProjectorApp, closer: Closer, ui: &mut Ui| {
+            //     ui.vertical_centered_justified(|ui| {
+            //         ui.with_inner_margin(Margin { top: 0, bottom: 4, left: 0, right: 0 }, |ui| {
+            //             ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
+            //                 ui.label("This is a test.\nThe quick brown fox jumps over the lazy dog.");
+            //             });
+            //         });
+            //         ui.horizontal(|ui| {
+            //             if ui.button("Close").clicked() {
+            //                 closer.close();
+            //             }
+            //             if ui.button("Test").clicked() {
+            //                 closer.close();
+            //             }
+            //         });
+            //     });
+            // })),
+            message: MBox::new_with({
+                struct StartupMessage {
+                    reopen_count: u64,
+                }
+                impl MessageBox<ProjectorApp> for StartupMessage {
+                    fn show(&mut self, data: &mut ProjectorApp, closer: Closer, ui: &mut Ui) {
+                        centered_mbox_modal(ui.ctx(), |ui| {
+                            ui.label(format!("Choose (Reopen count: {})", self.reopen_count));
+                            ui.horizontal(|ui| {
+                                if ui.clicked("Close") {
+                                    closer.close();
+                                }
+                                if ui.clicked("Reopen") {
+                                    data.show_message(StartupMessage {
+                                        reopen_count: self.reopen_count + 1,
+                                    });
+                                }
+                            });
+                        });
+                    }
+                }
+                StartupMessage {
+                    reopen_count: 0,
+                }
+            }),
         })
     }
 }
@@ -199,19 +242,23 @@ impl ProjectorApp {
         }
     }
 
-    fn open_in_editor<P: AsRef<Path>>(&self, path: P) {
-        fn inner(app: &ProjectorApp, path: &Path) {
+    pub fn show_message<M: MessageBox<Self> + 'static>(&self, message: M) {
+        self.message.open(message);
+    }
+
+    fn open_in_editor<P: AsRef<Path>>(&self, path: P) -> Result<ExitStatus, ExecError> {
+        fn inner(app: &ProjectorApp, path: &Path) -> Result<ExitStatus, ExecError> {
             let editor_cmd = &app.settings.general.editor_command;
             let path_str = format!(r#""{}""#, path.display());
             use strfmt::strfmt;
-            let edit_cmd = strfmt!(editor_cmd, path => path_str).unwrap();
-            crate::util::execute::execute(&edit_cmd);
+            let cmd = strfmt!(editor_cmd, path => path_str).unwrap();
+            crate::util::execute::exec_shell(&cmd)
         }
-        inner(self, path.as_ref());
+        inner(self, path.as_ref())
     }
 
-    fn open_terminal_here<P: AsRef<Path>>(&self, path: P) {
-        fn inner(app: &ProjectorApp, path: &Path) {
+    fn open_terminal_here<P: AsRef<Path>>(&self, path: P) -> Result<ExitStatus, ExecError> {
+        fn inner(app: &ProjectorApp, path: &Path) -> Result<ExitStatus, ExecError> {
             let path = if path.is_file() {
                 path.parent().expect("Path has no parent.")
             } else {
@@ -220,14 +267,14 @@ impl ProjectorApp {
             let shell_cmd = &app.settings.general.shell_command;
             let path_str = format!(r#""{}""#, path.display());
             use strfmt::strfmt;
-            let shell_cmd = strfmt!(shell_cmd, path => path_str).unwrap();
-            crate::util::execute::execute(&shell_cmd);
+            let cmd = strfmt!(shell_cmd, path => path_str).unwrap();
+            crate::util::execute::exec_shell(&cmd)
         }
-        inner(self, path.as_ref());
+        inner(self, path.as_ref())
     }
 
-    fn reveal_in_file_explorer<P: AsRef<Path>>(&self, path: P) {
-        fn inner(app: &ProjectorApp, path: &Path) {
+    fn reveal_in_file_explorer<P: AsRef<Path>>(&self, path: P) -> Result<ExitStatus, ExecError> {
+        fn inner(app: &ProjectorApp, path: &Path) -> Result<ExitStatus, ExecError> {
             let path = if path.is_file() {
                 path.parent().expect("Path has no parent.")
             } else {
@@ -236,10 +283,10 @@ impl ProjectorApp {
             let explorer_cmd = &app.settings.general.explorer_command;
             let path_str = format!(r#""{}""#, path.display());
             use strfmt::strfmt;
-            let explorer_cmd = strfmt!(explorer_cmd, path => path_str).unwrap();
-            crate::util::execute::execute(&explorer_cmd);
+            let cmd = strfmt!(explorer_cmd, path => path_str).unwrap();
+            crate::util::execute::exec_shell(&cmd)
         }
-        inner(self, path.as_ref());
+        inner(self, path.as_ref())
     }
 }
 
@@ -254,6 +301,25 @@ impl App for ProjectorApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // if let Some(mut popup) = self.message.take() {
+        //     let closer = OwnedCloser::new();
+        //     let close = closer.make_closer();
+        //     Modal::new(Id::new("message_modal"))
+        //         .area(
+        //             Area::new(Id::new("message_modal_area"))
+        //                 .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+        //                 .constrain(true)
+        //         )
+        //         .frame(
+        //             Frame::menu(&ctx.style())
+        //         )
+        //         .show(ctx, |ui| {
+        //             popup.show(self, close, ui);
+        //         });
+        //     if !closer.is_closed() && self.message.is_none() {
+        //         self.message = Some(popup);
+        //     }
+        // }
         panel::TopBottomPanel::bottom("bottom_panel")
             .frame(Frame::new().stroke(Stroke::NONE))
             .show(ctx, |ui| {
@@ -320,7 +386,7 @@ impl App for ProjectorApp {
                 ModalUi::Settings(settings_dialog) => {
                     settings_dialog.show(
                         closer,
-                        &mut self.app_data,
+                        &self.app_data,
                         &mut self.settings,
                         ui,
                     );
@@ -391,23 +457,40 @@ impl App for ProjectorApp {
                                         let mut open_shell_toggle = self.runtime.recent_project_context.open_shell;
                                         let mut open_explorer_toggle = self.runtime.recent_project_context.open_explorer;
                                         let mut remove_index = None;
-                                        self.persist.recent_projects.iter().enumerate().for_each(|(index, proj)| {
-                                            let path = match proj {
+                                        // let Self {
+                                        //     persist,
+                                        //     message,
+                                        //     ..
+                                        // } = self;
+                                        for index in 0..self.persist.recent_projects.len() {
+                                            let proj = self.persist.recent_projects[index].clone();
+                                            let path = match &proj {
                                                 ProjectPath::Rust(path_buf) => path_buf.as_path(),
                                                 ProjectPath::Python(path_buf) => path_buf.as_path(),
                                                 ProjectPath::Web(path_buf) => path_buf.as_path(),
                                                 ProjectPath::Other(path_buf) => path_buf.as_path(),
-                                            };
-                                            let recent = Recent::new(proj);
+                                            }.to_owned();
+                                            let recent = Recent::new(&proj);
                                             let recent_resp = recent.ui(ui);
                                             if recent_resp.clicked() {
-                                                self.open_in_editor(path);
+                                                let result = self.open_in_editor(&path);
+                                                match result {
+                                                    Ok(exit_status) => {
+                                                        if !exit_status.success() {
+                                                            self.show_message(format!("Open Editor shell command failed with an exit status of {}", exit_status.code().unwrap_or(-1)));
+                                                        }
+                                                    },
+                                                    Err(err) => {
+                                                        self.show_message(format!("There was an error executing Open Editor shell command: {}", err));
+                                                    },
+                                                }
                                             }
                                             if recent_resp.clicked_by(PointerButton::Secondary) {
                                                 open_editor_toggle = false;
                                                 open_shell_toggle = false;
                                                 open_explorer_toggle = false;
                                             }
+                                            // drop((proj, recent));
                                             recent_resp.context_menu(|ui| {
                                                 ui.horizontal(|ui| {
                                                     let close_resp = ui.button("❎");
@@ -468,13 +551,43 @@ impl App for ProjectorApp {
                                                 
                                                 if exec_actions {
                                                     if open_editor_toggle {
-                                                        self.open_in_editor(path);
+                                                        let result = self.open_in_editor(&path);
+                                                        match result {
+                                                            Ok(exit_status) => {
+                                                                if !exit_status.success() {
+                                                                    self.show_message(format!("Open Editor shell command failed with an exit status of {}", exit_status.code().unwrap_or(-1)));
+                                                                }
+                                                            },
+                                                            Err(err) => {
+                                                                self.show_message(format!("There was an error executing Open Editor shell command: {}", err));
+                                                            },
+                                                        }
                                                     }
                                                     if open_explorer_toggle {
-                                                        self.reveal_in_file_explorer(path);
+                                                        let result = self.reveal_in_file_explorer(&path);
+                                                        match result {
+                                                            Ok(exit_status) => {
+                                                                if !exit_status.success() {
+                                                                    self.show_message(format!("Reveal in File Explorer shell command failed with an exit status of {}", exit_status.code().unwrap_or(-1)));
+                                                                }
+                                                            },
+                                                            Err(err) => {
+                                                                self.show_message(format!("There was an error executing Reveal in File Explorer shell command: {}", err));
+                                                            },
+                                                        }
                                                     }
                                                     if open_shell_toggle {
-                                                        self.open_terminal_here(path);
+                                                        let result = self.open_terminal_here(&path);
+                                                        match result {
+                                                            Ok(exit_status) => {
+                                                                if !exit_status.success() {
+                                                                    self.show_message(format!("Open Terminal Here shell command failed with an exit status of {}", exit_status.code().unwrap_or(-1)));
+                                                                }
+                                                            },
+                                                            Err(err) => {
+                                                                self.show_message(format!("There was an error executing Open Terminal Here shell command: {}", err));
+                                                            },
+                                                        }
                                                     }
                                                     ui.close_menu();
                                                 }
@@ -495,7 +608,7 @@ impl App for ProjectorApp {
                                                 let path_str = format!("{}", path.display());
                                                 ui.label(&path_str);
                                             });
-                                        });
+                                        }
                                         if let Some(index) = remove_index {
                                             self.persist.recent_projects.remove(index);
                                         }
@@ -506,11 +619,6 @@ impl App for ProjectorApp {
                                             open_explorer: open_explorer_toggle,
                                         };
                                     });
-                                    // Frame::NONE
-                                    // .inner_margin(Margin::symmetric(16, 0))
-                                    // .show(ui, |ui| {
-    
-                                    // });
                                 });
                             });
                             // end scroll area
@@ -580,6 +688,8 @@ impl App for ProjectorApp {
                     }
                 });
             self.tab_index = tab_index;
+            let mbox = self.message.clone();
+            mbox.show(self, ui);
         });
     }
 }

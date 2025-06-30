@@ -1,3 +1,5 @@
+use std::sync::atomic::AtomicBool;
+
 use eframe::{
     egui::{self, *},
 };
@@ -182,13 +184,13 @@ impl ResponseExt for Response {
     }
 }
 
-pub trait CloserBoolExt {
-    fn closer(&mut self) -> DialogCloser<'_>;
+pub trait CloserAtomicBoolExt {
+    fn closer(&self) -> DialogCloser<'_>;
 }
 
-impl CloserBoolExt for bool {
+impl CloserAtomicBoolExt for AtomicBool {
     #[inline]
-    fn closer(&mut self) -> DialogCloser<'_> {
+    fn closer(&self) -> DialogCloser<'_> {
         DialogCloser::new(self)
     }
 }
@@ -196,7 +198,7 @@ impl CloserBoolExt for bool {
 pub trait BoolExt {
     fn toggle(&mut self) -> Self;
     fn toggle_if(&mut self, condition: bool) -> Self;
-    fn select<T>(self, _false: T, _true: T) -> T;
+    fn select<T>(self, _true: T, _false: T) -> T;
 }
 
 impl BoolExt for bool {
@@ -320,5 +322,17 @@ impl InstantExt for std::time::Instant {
     fn reset(&mut self) -> std::time::Duration {
         self.replace(Self::now())
             .elapsed()
+    }
+}
+
+pub trait OptionExt<T> {
+    fn and_replace<F: FnOnce(T) -> Option<T>>(&mut self, replace: F);
+}
+
+impl<T> OptionExt<T> for Option<T> {
+    fn and_replace<F: FnOnce(T) -> Option<T>>(&mut self, replace: F) {
+        if let Some(value) = self.take() {
+            *self = replace(value);
+        }
     }
 }

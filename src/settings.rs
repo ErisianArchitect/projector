@@ -208,16 +208,16 @@ impl SettingsTab {
 }
 
 pub struct DialogCloser<'a> {
-    close: &'a mut bool,
+    close: &'a AtomicBool,
 }
 
 impl<'a> DialogCloser<'a> {
-    pub fn new(close: &'a mut bool) -> Self {
+    pub fn new(close: &'a AtomicBool) -> Self {
         Self { close }
     }
 
-    pub fn close(&mut self) {
-        *self.close = true;
+    pub fn close(&self) -> bool {
+        !self.close.swap(true, Ordering::AcqRel)
     }
 }
 
@@ -239,12 +239,12 @@ impl OwnedCloser {
 
     #[inline]
     pub fn close(&self) -> bool {
-        !self.close.swap(true, Ordering::Relaxed)
+        !self.close.swap(true, Ordering::AcqRel)
     }
 
     #[inline]
     pub fn is_closed(&self) -> bool {
-        self.close.load(Ordering::Relaxed)
+        self.close.load(Ordering::Acquire)
     }
 
     #[inline]
@@ -351,14 +351,14 @@ impl SettingsDialog {
     pub fn show(
         &mut self,
         closer: Closer<'_>,
-        app_data: &mut AppData,
+        app_data: &AppData,
         original_settings: &mut Settings,
         ui: &mut Ui,
     ) -> bool {
         fn apply_settings(
             target: &mut Settings,
             settings: &Settings,
-            app_data: &mut AppData,
+            app_data: &AppData,
         ) -> crate::error::Result<()> {
             target.apply_settings(&settings);
             app_data.config().save_settings(target)

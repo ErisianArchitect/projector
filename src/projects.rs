@@ -93,6 +93,27 @@ impl ProjectPath {
             ProjectPath::Other(path_buf) => path_buf,
         }
     }
+
+    #[must_use]
+    #[inline]
+    pub fn map_path<R, F: FnOnce(PathBuf) -> R>(self, f: F) -> R {
+        f(self.take_inner())
+    }
+
+    #[inline]
+    pub fn remap<F: FnOnce(PathBuf) -> Self>(&mut self, f: F) {
+        unsafe {
+            let taken = std::ptr::read(self);
+            std::ptr::write(self, f(taken.take_inner()));
+        }
+    }
+}
+
+#[test]
+fn test_fn() {
+    let mut path = ProjectPath::rust("test.rs");
+    path.remap(ProjectPath::Python);
+    println!("{:?}", path.project_type());
 }
 
 impl AsRef<Path> for ProjectPath {

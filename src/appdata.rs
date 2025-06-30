@@ -1,6 +1,6 @@
 use std::{fs::File, io::Write, path::{
     Path, PathBuf,
-}, time::SystemTime};
+}, sync::Arc, time::SystemTime};
 
 use directories::ProjectDirs;
 use eframe::{
@@ -41,6 +41,7 @@ impl SettingsSaver {
     }
 }
 
+#[derive(Debug)]
 pub struct AppConfig {
     path: PathBuf,
 }
@@ -144,6 +145,7 @@ impl AppConfig {
     }
 }
 
+#[derive(Debug)]
 pub struct AppCache {
     path: PathBuf,
 }
@@ -186,13 +188,28 @@ impl AppCache {
     }
 }
 
+/// [AppData] is a wrapper around an [Arc<AppdataInner>]. That means
+/// that you can clone it freely and pass it around.
+#[derive(Debug, Clone)]
 pub struct AppData {
-    config: AppConfig,
-    cache: AppCache,
+    inner: Arc<AppDataInner>
     // plugins: PathBuf,
 }
 
-impl AppData {
+#[derive(Debug)]
+pub struct AppDataInner {
+    config: AppConfig,
+    cache: AppCache,
+}
+
+impl std::ops::Deref for AppData {
+    type Target = AppDataInner;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl AppDataInner {
     pub fn from(qualifier: &str, org: &str, app: &str) -> crate::error::Result<Self> {
         let dirs = directories::ProjectDirs::from(qualifier, org, app).ok_or(crate::error::Error::TempErr("ProjectDirs not created."))?;
         let config = AppConfig::new(dirs.config_dir());
@@ -230,6 +247,20 @@ impl AppData {
     }
 }
 
+impl AppData {
+    pub fn from(qualifier: &str, org: &str, app: &str) -> crate::error::Result<Self> {
+        let dirs = directories::ProjectDirs::from(qualifier, org, app).ok_or(crate::error::Error::TempErr("ProjectDirs not created."))?;
+        let config = AppConfig::new(dirs.config_dir());
+        let cache = AppCache::new(dirs.cache_dir());
+        Ok(Self {
+            inner: Arc::new(AppDataInner {
+                config,
+                cache,
+            })
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -243,10 +274,9 @@ mod tests {
         }
 
         let appdata = AppData::from("com", "ErisianArchitect", "Projector")?;
+        let local_time = appdata.config().settings_modified_time_local().expect("Failed to get modified time.");
 
-        let settings_path = appdata.config.settings_path();
-        println!("{}", settings_path.display());
-        println!("Exists: {}", settings_path.exists());
+        println!("Modified time: {}", local_time.format("%I:%M:%S %p %m/%d/%Y"));
         
         Ok(())
     }
