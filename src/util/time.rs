@@ -232,6 +232,83 @@ impl RepeatTimer {
     }
 }
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, bincode::Encode, bincode::Decode)]
+pub enum Month {
+    January = 1,
+    February = 2,
+    March = 3,
+    April = 4,
+    May = 5,
+    June = 6,
+    July = 7,
+    August = 8,
+    September = 9,
+    October = 10,
+    November = 11,
+    December = 12,
+}
+
+impl Month {
+    /// Expects a value from 1 to 12.
+    #[must_use]
+    #[inline]
+    pub const fn from_u32(month: u32) -> Option<Month> {
+        if month < 1 || month > 12 {
+            return None;
+        }
+        let month_u8 = month as u8;
+        unsafe {
+            Some(std::mem::transmute(month_u8))
+        }
+    }
+
+    #[must_use]
+    #[inline]
+    pub const fn to_u32(self) -> u32 {
+        self as u32
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, bincode::Encode, bincode::Decode)]
+pub struct Date {
+    year: i32,
+    month: Month,
+    day: u8,
+}
+
+impl Date {
+    pub const fn new(year: i32, month: u32, day: u32) -> Option<Self> {
+        let month = crate::const_try_opt!(Month::from_u32(month));
+        if day > 31 || day == 0 {
+            return None;
+        }
+        Some(Self {
+            year,
+            month,
+            day: day as u8,
+        })
+    }
+
+    #[must_use]
+    #[inline]
+    pub const fn year(self) -> i32 {
+        self.year
+    }
+
+    #[must_use]
+    #[inline]
+    pub const fn month(self) -> Month {
+        self.month
+    }
+
+    #[must_use]
+    #[inline]
+    pub const fn day(self) -> u32 {
+        self.day as u32
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

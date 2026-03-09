@@ -1,2 +1,2 @@
 @echo off
-cargo run --release
+cargo run --release --features use_terminal

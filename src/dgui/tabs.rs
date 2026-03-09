@@ -61,7 +61,7 @@ impl<'a, T: Copy> Tabs<'a, T> {
             tabs,
             size_mode: TabSizeMode::Equal,
             text_align: Align::Min,
-            title_padding: Vec2::new(16.0, 8.0),
+            title_padding: Vec2::new(16.0, 4.0),
             padding: Margin::from(vec2(0.0, 0.0)),
         }
     }

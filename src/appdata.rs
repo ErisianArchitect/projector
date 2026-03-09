@@ -188,18 +188,18 @@ impl AppCache {
     }
 }
 
+#[derive(Debug)]
+pub struct AppDataInner {
+    config: AppConfig,
+    cache: AppCache,
+}
+
 /// [AppData] is a wrapper around an [Arc<AppdataInner>]. That means
 /// that you can clone it freely and pass it around.
 #[derive(Debug, Clone)]
 pub struct AppData {
     inner: Arc<AppDataInner>
     // plugins: PathBuf,
-}
-
-#[derive(Debug)]
-pub struct AppDataInner {
-    config: AppConfig,
-    cache: AppCache,
 }
 
 impl std::ops::Deref for AppData {

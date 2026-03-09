@@ -96,25 +96,37 @@ impl<D> Clone for MBox<D> {
 }
 
 impl<D> MBox<D> {
+    #[must_use]
+    #[inline]
     pub fn new() -> Self {
         Self {
             message: Arc::new(Mutex::new(None)),
         }
     }
 
+    #[must_use]
+    #[inline]
     pub fn new_with<M: MessageBox<D> + 'static>(message: M) -> Self {
         Self {
             message: Arc::new(Mutex::new(Some(Box::new(message)))),
         }
     }
 
+    #[must_use]
+    #[inline]
     fn lock<'a>(&'a self) -> MutexGuard<'a, MBoxMessage<D>> {
         self.message.lock().unwrap()
     }
 
+    #[inline]
     pub fn open<M: MessageBox<D> + 'static>(&self, message: M) {
+        self.open_boxed(Box::new(message));
+    }
+
+    #[inline]
+    pub fn open_boxed(&self, message: Box<dyn MessageBox<D> + 'static>) {
         let mut message_lock = self.lock();
-        *message_lock = Some(Box::new(message));
+        *message_lock = Some(message);
     }
 
     pub fn show(&self, data: &mut D, ui: &mut Ui) {

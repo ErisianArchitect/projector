@@ -5,7 +5,7 @@ use std::{any, collections::VecDeque, io::Write, ops::BitOrAssign, os::windows::
 use eframe::{
     egui::{self, Style, *}, epaint::tessellator::path, App, CreationContext
 };
-use crate::{appdata::AppData, dgui::{mbox::{centered_mbox_modal, MBox, MessageBox}, recents::Recent}, ext::{BoolExt, CloserAtomicBoolExt, Replace, UiExt}, project_wizard::ProjectWizard, projects::ProjectPath, util::{execute::ExecError, marker::Marker}};
+use crate::{appdata::AppData, dgui::{mbox::{centered_mbox_modal, MBox, MessageBox}, recents::{GroupBy, ProjectTypeGroupSort, Recent, Recents, RecentsSort}}, ext::{BoolExt, CloserAtomicBoolExt, Replace, UiExt}, project_wizard::ProjectWizard, projects::ProjectPath, util::{execute::ExecError, marker::Marker}, work_pool::{WorkPool, WorkResponse}};
 use crate::settings::*;
 
 use crate::{settings::Settings, dgui::{self, tabs::{Tab, TabSizeMode, Tabs}}, projects::ProjectType};
@@ -91,13 +91,13 @@ impl ModalUi {
 
 #[derive(Debug, bincode::Encode, bincode::Decode)]
 pub struct Persist {
-    recent_projects: VecDeque<ProjectPath>
+    recent_projects: Recents,
 }
 
 impl Default for Persist {
     fn default() -> Self {
         Self {
-            recent_projects: VecDeque::new(),
+            recent_projects: Recents::new(Vec::new(), RecentsSort::MostRecent, GroupBy::Ungrouped),
         }
     }
 }
@@ -139,6 +139,7 @@ pub struct ProjectorApp {
     persist: Persist,
     runtime: Runtime,
     message: MBox<ProjectorApp>,
+    work_pool: WorkPool,
 }
 
 impl ProjectorApp {
@@ -158,9 +159,10 @@ impl ProjectorApp {
         };
         let persist = match app_data.config().load::<_, Persist>(".persist") {
             Ok(mut persist) => {
-                // persist.recent_projects.push_back(ProjectPath::Python(PathBuf::from(r#"C:\Users\derek\Documents\code\python\hydra"#)));
-                // persist.recent_projects.push_back(ProjectPath::Web(PathBuf::from(r#"C:\Users\derek\Documents\code\web\erisianarchitect"#)));
-                // persist.recent_projects.push_back(ProjectPath::Other(PathBuf::from(r#"C:\Users\derek\Documents\code\writeups\region_files"#)));
+                persist.recent_projects.set_group_by_and_sort(
+                    settings.general.default_recents_sort.resolve_sort(persist.recent_projects.sort()),
+                    settings.general.default_group_by.resolve_group_by(persist.recent_projects.group_by()),
+                );
                 persist
             },
             Err(err) => {
@@ -186,53 +188,11 @@ impl ProjectorApp {
             app_data,
             persist,
             runtime: Runtime::default(),
-            // message: Some(Box::new(|app: &mut ProjectorApp, closer: Closer, ui: &mut Ui| {
-            //     ui.vertical_centered_justified(|ui| {
-            //         ui.with_inner_margin(Margin { top: 0, bottom: 4, left: 0, right: 0 }, |ui| {
-            //             ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
-            //                 ui.label("This is a test.\nThe quick brown fox jumps over the lazy dog.");
-            //             });
-            //         });
-            //         ui.horizontal(|ui| {
-            //             if ui.button("Close").clicked() {
-            //                 closer.close();
-            //             }
-            //             if ui.button("Test").clicked() {
-            //                 closer.close();
-            //             }
-            //         });
-            //     });
-            // })),
-            message: MBox::new_with({
-                struct StartupMessage {
-                    reopen_count: u64,
-                }
-                impl MessageBox<ProjectorApp> for StartupMessage {
-                    fn show(&mut self, data: &mut ProjectorApp, closer: Closer, ui: &mut Ui) {
-                        centered_mbox_modal(ui.ctx(), |ui| {
-                            ui.label(format!("Choose (Reopen count: {})", self.reopen_count));
-                            ui.horizontal(|ui| {
-                                if ui.clicked("Close") {
-                                    closer.close();
-                                }
-                                if ui.clicked("Reopen") {
-                                    data.show_message(StartupMessage {
-                                        reopen_count: self.reopen_count + 1,
-                                    });
-                                }
-                            });
-                        });
-                    }
-                }
-                StartupMessage {
-                    reopen_count: 0,
-                }
-            }),
+            work_pool: WorkPool::new(),
+            message: MBox::new(),
         })
     }
-}
 
-impl ProjectorApp {
     fn save_internal(&self) {
         match self.app_data.config().save(".persist", &self.persist) {
             Ok(()) => (),
@@ -246,19 +206,37 @@ impl ProjectorApp {
         self.message.open(message);
     }
 
-    fn open_in_editor<P: AsRef<Path>>(&self, path: P) -> Result<ExitStatus, ExecError> {
-        fn inner(app: &ProjectorApp, path: &Path) -> Result<ExitStatus, ExecError> {
-            let editor_cmd = &app.settings.general.editor_command;
-            let path_str = format!(r#""{}""#, path.display());
-            use strfmt::strfmt;
-            let cmd = strfmt!(editor_cmd, path => path_str).unwrap();
-            crate::util::execute::exec_shell(&cmd)
-        }
-        inner(self, path.as_ref())
+    pub fn show_message_boxed(&self, message: Box<dyn MessageBox<Self> + 'static>) {
+        self.message.open_boxed(message);
     }
 
-    fn open_terminal_here<P: AsRef<Path>>(&self, path: P) -> Result<ExitStatus, ExecError> {
-        fn inner(app: &ProjectorApp, path: &Path) -> Result<ExitStatus, ExecError> {
+    fn open_in_editor<P: AsRef<Path>>(&self, ctx: &Context, path: P) {
+        fn inner(app: &ProjectorApp, ctx: &Context, path: &Path) {
+            let editor_cmd = &app.settings.general.editor_command;
+            let path_str = format!(r#""{}""#, path.display());
+            let cmd = strfmt::strfmt!(editor_cmd, path => path_str).unwrap();
+            ctx.send_viewport_cmd(ViewportCommand::WindowLevel(WindowLevel::AlwaysOnTop));
+            let ctx = ctx.clone();
+            app.work_pool.spawn(move |responder| {
+                match crate::util::execute::exec_shell(&cmd) {
+                    Ok(status) => {
+                        if !status.success() {
+                            responder.show_message(format!("Open Editor Command failed: {}", status.code().unwrap_or_default())).expect("Failed to send message.");
+                        }
+                    }
+                    Err(err) => {
+                        responder.show_message(format!("Failed to execute Open Editor Command: {err:?}")).expect("Failed to send message");
+                    }
+                }
+                ctx.send_viewport_cmd(ViewportCommand::WindowLevel(WindowLevel::Normal));
+                ctx.send_viewport_cmd(ViewportCommand::Focus);
+            });
+        }
+        inner(self, ctx, path.as_ref())
+    }
+
+    fn open_terminal_here<P: AsRef<Path>>(&self, ctx: &Context, path: P) {
+        fn inner(app: &ProjectorApp, ctx: &Context, path: &Path) {
             let path = if path.is_file() {
                 path.parent().expect("Path has no parent.")
             } else {
@@ -266,15 +244,25 @@ impl ProjectorApp {
             };
             let shell_cmd = &app.settings.general.shell_command;
             let path_str = format!(r#""{}""#, path.display());
-            use strfmt::strfmt;
-            let cmd = strfmt!(shell_cmd, path => path_str).unwrap();
-            crate::util::execute::exec_shell(&cmd)
+            let cmd = strfmt::strfmt!(shell_cmd, path => path_str).unwrap();
+            let ctx = ctx.clone();
+            app.work_pool.spawn(move |send| {
+                match crate::util::execute::exec_shell(&cmd) {
+                    Ok(status) if !status.success() => {
+                        send.send(WorkResponse::show_message(format!("Open Terminal Command failed: {}", status.code().unwrap_or_default()))).expect("Failed to send message.");
+                    }
+                    Ok(_) => {}
+                    Err(err) => {
+                        send.send(WorkResponse::show_message(format!("Failed to execute Open Terminal Command: {err:?}"))).expect("Failed to send message.");
+                    }
+                }
+            });
         }
-        inner(self, path.as_ref())
+        inner(self, ctx, path.as_ref())
     }
 
-    fn reveal_in_file_explorer<P: AsRef<Path>>(&self, path: P) -> Result<ExitStatus, ExecError> {
-        fn inner(app: &ProjectorApp, path: &Path) -> Result<ExitStatus, ExecError> {
+    fn reveal_in_file_explorer<P: AsRef<Path>>(&self, ctx: &Context, path: P) {
+        fn inner(app: &ProjectorApp, path: &Path) {
             let path = if path.is_file() {
                 path.parent().expect("Path has no parent.")
             } else {
@@ -282,9 +270,22 @@ impl ProjectorApp {
             };
             let explorer_cmd = &app.settings.general.explorer_command;
             let path_str = format!(r#""{}""#, path.display());
-            use strfmt::strfmt;
-            let cmd = strfmt!(explorer_cmd, path => path_str).unwrap();
-            crate::util::execute::exec_shell(&cmd)
+            let cmd = strfmt::strfmt!(explorer_cmd, path => path_str).unwrap();
+            app.work_pool.spawn(move |send| {
+                match crate::util::execute::exec_shell(&cmd) {
+                    Ok(status) if !status.success() => {
+                        send.send(WorkResponse::show_message(
+                            format!("Reveal in File Explorer Command failed: {}", status.code().unwrap_or_default())
+                        ));
+                    }
+                    Ok(_) =>(),
+                    Err(err) => {
+                        send.send(WorkResponse::show_message(
+                            format!("Failed to execute Reveal in File Explorer Command: {err:?}")
+                        )).expect("Failed to send message.");
+                    }
+                }
+            });
         }
         inner(self, path.as_ref())
     }
@@ -301,25 +302,27 @@ impl App for ProjectorApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        // if let Some(mut popup) = self.message.take() {
-        //     let closer = OwnedCloser::new();
-        //     let close = closer.make_closer();
-        //     Modal::new(Id::new("message_modal"))
-        //         .area(
-        //             Area::new(Id::new("message_modal_area"))
-        //                 .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
-        //                 .constrain(true)
-        //         )
-        //         .frame(
-        //             Frame::menu(&ctx.style())
-        //         )
-        //         .show(ctx, |ui| {
-        //             popup.show(self, close, ui);
-        //         });
-        //     if !closer.is_closed() && self.message.is_none() {
-        //         self.message = Some(popup);
-        //     }
-        // }
+        {
+            let recv = self.work_pool.receiver().clone();
+            while !recv.is_empty() {
+                match recv.recv_timeout(Duration::from_millis(4)) {
+                    Ok(WorkResponse::Callback(callback)) => {
+                        println!("callback()");
+                        callback(self, ctx);
+                    }
+                    Ok(WorkResponse::FallibleCallback(callback)) => {
+                        match callback(self, ctx) {
+                            Ok(()) => {}
+                            Err(err) => {
+                                // TODO
+                            }
+                        }
+                    }
+                    Err(_) => { break }
+                }
+            }
+        }
+
         panel::TopBottomPanel::bottom("bottom_panel")
             .frame(Frame::new().stroke(Stroke::NONE))
             .show(ctx, |ui| {
@@ -375,6 +378,45 @@ impl App for ProjectorApp {
 
                             });
                         }
+                        ui.menu_button(crate::charcons::PLUS, |ui| {
+                            fn pick_folders() -> Option<Vec<PathBuf>> {
+                                rfd::FileDialog::new().pick_folders()
+                            }
+                            fn populate<F: Fn(PathBuf) -> ProjectPath>(recents: &mut Recents, map: F) -> bool {
+                                if let Some(mut paths) = pick_folders() {
+                                    // reverse paths so that they are added in the order that they were selected.
+                                    // paths.reverse();
+                                    for path in paths {
+                                        recents.insert_now(map(path));
+                                    }
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                            if ui.button("Rust").clicked() {
+                                ui.close_menu();
+                                populate(&mut self.persist.recent_projects, ProjectPath::Rust);
+                            }
+                            if ui.button("Python").clicked() {
+                                ui.close_menu();
+                                populate(&mut self.persist.recent_projects, ProjectPath::Python);
+                            }
+                            if ui.button("Web").clicked() {
+                                ui.close_menu();
+                                populate(&mut self.persist.recent_projects, ProjectPath::Web);
+                            }
+                            if ui.button("Other").clicked() {
+                                ui.close_menu();
+                                populate(&mut self.persist.recent_projects, ProjectPath::Other);
+                            }
+                        });
+                        if crate::HAS_TERMINAL {
+                            ui.add(
+                                Label::new("Has Terminal")
+                                    .selectable(false)
+                            );
+                        }
                     });
                 });
             });
@@ -417,34 +459,79 @@ impl App for ProjectorApp {
                 .show(ui, |index, tab, ui| {
                     match tab {
                         MainTab::Main => {
-                            if ui.button("Add Directory").clicked() {
-                                if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                                    self.persist.recent_projects.push_back(ProjectPath::Other(dir));
-                                }
-                            }
-                            ui.with_inner_margin(Margin { left: 16, right: 16, top: 16, bottom: 8 }, |ui| {
-                                menu::bar(ui, |ui| {
-                                    ui.menu_button(crate::charcons::PUSHPIN, |ui| {
-                                        if ui.clicked("Test") {
-                                            println!("Test");
-                                        }
-                                    });
-                                    ui.pin_btn(ui.spacing().interact_size.y, Color32::WHITE);
-                                });
-                            });
+                            // if ui.button("Add Directory").clicked() {
+                            //     if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                            //         self.persist.recent_projects.insert_now(ProjectPath::Other(dir));
+                            //     }
+                            // }
+                            // ui.with_inner_margin(Margin { left: 16, right: 16, top: 16, bottom: 8 }, |ui| {
+                            //     menu::bar(ui, |ui| {
+                            //         ui.menu_button(crate::charcons::PUSHPIN, |ui| {
+                            //             if ui.clicked("Test") {
+                            //                 println!("Test");
+                            //             }
+                            //         });
+                            //         ui.pin_btn(ui.spacing().interact_size.y, Color32::WHITE);
+                            //     });
+                            // });
                             let spacing = ui.spacing_mut().item_spacing.replace(vec2(0.0, 0.0));
-                            let recents_search = Frame::NONE
-                                .inner_margin(Margin { top: 0, bottom: 0, left: 16, right: 16 })
+                            let (recents_search, sort_combo, group_combo) = Frame::NONE
+                                .inner_margin(Margin { top: 16, bottom: 0, left: 16, right: 16 })
                                 .show(ui, |ui| {
                                     Frame::NONE
                                     .stroke(Stroke::new(1.0, Color32::WHITE))
                                     .show(ui, |ui| {
-                                        TextEdit::singleline(&mut self.runtime.recents_search_text)
-                                            .desired_width(ui.available_width())
-                                            .hint_text("Filter")
-                                            .show(ui)
-                                    }).inner;
-                                });
+                                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                            let mut sort = self.persist.recent_projects.sort();
+                                            let sort_combo = ComboBox::new("recents_sort_combo", "")
+                                                .selected_text(sort.text())
+                                                .width(150.0)
+                                                .show_ui(ui, |ui| {
+                                                    fn item(ui: &mut Ui, current_value: &mut RecentsSort, sort: RecentsSort) -> Response {
+                                                        ui.selectable_value(current_value, sort, sort.text())
+                                                    }
+                                                    item(ui, &mut sort, RecentsSort::MostRecent);
+                                                    item(ui, &mut sort, RecentsSort::LeastRecent);
+                                                    item(ui, &mut sort, RecentsSort::NameAscending);
+                                                    item(ui, &mut sort, RecentsSort::NameDescending);
+                                                });
+                                            if sort != self.persist.recent_projects.sort() {
+                                                self.persist.recent_projects.set_sort(sort);
+                                            }
+                                            let mut group = self.persist.recent_projects.group_by();
+                                            let group_combo = ComboBox::new("recents_group_by_combo", "")
+                                                .selected_text(group.text())
+                                                .width(150.0)
+                                                .show_ui(ui, |ui| {
+                                                    fn item(ui: &mut Ui, current_value: &mut GroupBy, group_by: GroupBy) -> Response {
+                                                        ui.selectable_value(current_value, group_by, group_by.text())
+                                                    }
+                                                    item(ui, &mut group, GroupBy::Ungrouped);
+                                                    item(ui, &mut group, GroupBy::Day);
+                                                    item(ui, &mut group, GroupBy::Month);
+                                                    item(ui, &mut group, GroupBy::Year);
+                                                    item(ui, &mut group, GroupBy::ProjectType(ProjectTypeGroupSort::new(0, 1, 2, 3)));
+                                                });
+                                            if group != self.persist.recent_projects.group_by() {
+                                                self.persist.recent_projects.set_group_by(group);
+                                            }
+                                            // let (rect, resp) = ui.allocate_exact_size(vec2(16.0, ui.spacing().interact_size.y), Sense::all());
+                                            // let widg = WidgetText::RichText(RichText::new(crate::charcons::ELLIPSIS).font(FontId::monospace(16.0)));
+                                            // let btn = Button::new(widg);
+                                            // if ui.put(rect, btn).clicked() {
+                                            //     println!("Test");
+                                            // }
+                                            let recent_search = TextEdit::singleline(&mut self.runtime.recents_search_text)
+                                                .desired_width(ui.available_width())
+                                                .hint_text("Filter")
+                                                .show(ui).response;
+                                            if recent_search.changed() {
+                                                self.persist.recent_projects.set_search(&self.runtime.recents_search_text);
+                                            }
+                                            (recent_search, sort_combo, group_combo)
+                                        }).inner
+                                    }).inner
+                                }).inner;
                             ui.with_inner_margin(Margin { top: 0, bottom: 4, left: 0, right: 0 }, |ui| {
                                 ui.set_clip_rect(ui.available_rect_before_wrap());
                                 ScrollArea::new(Vec2b::new(false, true))
@@ -462,28 +549,19 @@ impl App for ProjectorApp {
                                         //     message,
                                         //     ..
                                         // } = self;
-                                        for index in 0..self.persist.recent_projects.len() {
-                                            let proj = self.persist.recent_projects[index].clone();
-                                            let path = match &proj {
+                                        for recent_index in 0..self.persist.recent_projects.len() {
+                                            let proj = self.persist.recent_projects[recent_index].clone();
+                                            let path = match proj.path() {
                                                 ProjectPath::Rust(path_buf) => path_buf.as_path(),
                                                 ProjectPath::Python(path_buf) => path_buf.as_path(),
                                                 ProjectPath::Web(path_buf) => path_buf.as_path(),
                                                 ProjectPath::Other(path_buf) => path_buf.as_path(),
                                             }.to_owned();
-                                            let recent = Recent::new(&proj);
+                                            let recent = Recent::new(proj.path());
                                             let recent_resp = recent.ui(ui);
                                             if recent_resp.clicked() {
-                                                let result = self.open_in_editor(&path);
-                                                match result {
-                                                    Ok(exit_status) => {
-                                                        if !exit_status.success() {
-                                                            self.show_message(format!("Open Editor shell command failed with an exit status of {}", exit_status.code().unwrap_or(-1)));
-                                                        }
-                                                    },
-                                                    Err(err) => {
-                                                        self.show_message(format!("There was an error executing Open Editor shell command: {}", err));
-                                                    },
-                                                }
+                                                self.persist.recent_projects.bump(recent_index);
+                                                self.open_in_editor(ctx, &path);
                                             }
                                             if recent_resp.clicked_by(PointerButton::Secondary) {
                                                 open_editor_toggle = false;
@@ -551,43 +629,14 @@ impl App for ProjectorApp {
                                                 
                                                 if exec_actions {
                                                     if open_editor_toggle {
-                                                        let result = self.open_in_editor(&path);
-                                                        match result {
-                                                            Ok(exit_status) => {
-                                                                if !exit_status.success() {
-                                                                    self.show_message(format!("Open Editor shell command failed with an exit status of {}", exit_status.code().unwrap_or(-1)));
-                                                                }
-                                                            },
-                                                            Err(err) => {
-                                                                self.show_message(format!("There was an error executing Open Editor shell command: {}", err));
-                                                            },
-                                                        }
+                                                        self.persist.recent_projects.bump(recent_index);
+                                                        self.open_in_editor(ctx, &path);
                                                     }
                                                     if open_explorer_toggle {
-                                                        let result = self.reveal_in_file_explorer(&path);
-                                                        match result {
-                                                            Ok(exit_status) => {
-                                                                if !exit_status.success() {
-                                                                    self.show_message(format!("Reveal in File Explorer shell command failed with an exit status of {}", exit_status.code().unwrap_or(-1)));
-                                                                }
-                                                            },
-                                                            Err(err) => {
-                                                                self.show_message(format!("There was an error executing Reveal in File Explorer shell command: {}", err));
-                                                            },
-                                                        }
+                                                        self.reveal_in_file_explorer(ctx, &path);
                                                     }
                                                     if open_shell_toggle {
-                                                        let result = self.open_terminal_here(&path);
-                                                        match result {
-                                                            Ok(exit_status) => {
-                                                                if !exit_status.success() {
-                                                                    self.show_message(format!("Open Terminal Here shell command failed with an exit status of {}", exit_status.code().unwrap_or(-1)));
-                                                                }
-                                                            },
-                                                            Err(err) => {
-                                                                self.show_message(format!("There was an error executing Open Terminal Here shell command: {}", err));
-                                                            },
-                                                        }
+                                                        self.open_terminal_here(ctx, &path);
                                                     }
                                                     ui.close_menu();
                                                 }
@@ -600,7 +649,7 @@ impl App for ProjectorApp {
                                                 ui.separator();
     
                                                 if ui.clicked("🗑 Remove") {
-                                                    remove_index.replace(index);
+                                                    remove_index.replace(recent_index);
                                                     ui.close_menu();
                                                 }
                                             });

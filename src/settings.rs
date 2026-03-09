@@ -6,10 +6,63 @@ use eframe::{
 use crate::{
     app::{
         MainTab, ModalUi,
-    }, appdata::AppData, dgui::tabs::{Tab, TabSizeMode, Tabs}, ext::{Replace, UiExt}, projects::ProjectType, util::{
+    }, appdata::AppData, dgui::{recents::{GroupBy, ProjectTypeGroupSort, RecentsSort}, tabs::{Tab, TabSizeMode, Tabs}}, ext::{Replace, UiExt}, projects::ProjectType, util::{
         alt::Alternator, marker::*, time::RepeatTimer
     }
 };
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, bincode::Encode, bincode::Decode)]
+pub enum DefaultRecentsSort {
+    Persist,
+    Sort(RecentsSort),
+}
+
+impl DefaultRecentsSort {
+    #[must_use]
+    #[inline]
+    pub const fn text(self) -> &'static str {
+        match self {
+            DefaultRecentsSort::Persist => "Persist",
+            DefaultRecentsSort::Sort(recents_sort) => recents_sort.text(),
+        }
+    }
+
+    #[must_use]
+    #[inline]
+    pub const fn resolve_sort(self, persisted: RecentsSort) -> RecentsSort {
+        match self {
+            DefaultRecentsSort::Persist => persisted,
+            DefaultRecentsSort::Sort(recents_sort) => recents_sort,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, bincode::Encode, bincode::Decode)]
+pub enum DefaultRecentsGroupBy {
+    Persist,
+    GroupBy(GroupBy),
+}
+
+impl DefaultRecentsGroupBy {
+    #[must_use]
+    #[inline]
+    pub const fn text(self) -> &'static str {
+        match self {
+            DefaultRecentsGroupBy::Persist => "Persist",
+            DefaultRecentsGroupBy::GroupBy(group_by) => group_by.text(),
+        }
+    }
+
+    #[must_use]
+    #[inline]
+    pub const fn resolve_group_by(self, persisted: GroupBy) -> GroupBy {
+        match self {
+            DefaultRecentsGroupBy::Persist => persisted,
+            DefaultRecentsGroupBy::GroupBy(group_by) => group_by,
+        }
+    }
+}
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, bincode::Encode, bincode::Decode)]
@@ -79,6 +132,8 @@ settings_structs!{
         pub open_after_create: bool = true,
         pub close_after_open: bool = false,
         pub default_projects_tab: MainTab = MainTab::Main,
+        pub default_recents_sort: DefaultRecentsSort = DefaultRecentsSort::Persist,
+        pub default_group_by: DefaultRecentsGroupBy = DefaultRecentsGroupBy::Persist,
         pub editor_command: String = String::from("code {path}"),
         pub shell_command: String = String::from(if cfg!(target_os = "windows") {
             "wt.exe --startingDirectory {path}"
@@ -634,6 +689,7 @@ impl GeneralGui {
                     |ui| {
                         record_change(&ComboBox::new("start_projects_tab_combo", "")
                             .selected_text(general.default_projects_tab.text())
+                            .width(150.0)
                             .show_ui(ui, |ui| {
                                 let projects_tab = &mut general.default_projects_tab;
                                 let mut selectable = move |tab: MainTab| {
@@ -647,6 +703,57 @@ impl GeneralGui {
                                 selectable(MainTab::Project(ProjectType::Other));
                                 selectable(MainTab::Text);
                             }).response);
+                    }
+                );
+                ui.setting_ui(
+                    LABEL_WIDTH,
+                    "Startup Recents Sort",
+                    "The sorting order of the recent projects list.",
+                    alt.next(),
+                    |ui| {
+                        record_change(&ComboBox::new("recents_list_sort_combo", "")
+                            .selected_text(general.default_recents_sort.text())
+                            .width(150.0)
+                            .show_ui(ui, |ui| {
+                                let recents_sort = &mut general.default_recents_sort;
+                                let mut selectable = move |sort: DefaultRecentsSort| {
+                                    let select_resp = ui.selectable_value(recents_sort, sort, sort.text());
+                                    record_change(&select_resp);
+                                };
+                                selectable(DefaultRecentsSort::Persist);
+                                selectable(DefaultRecentsSort::Sort(RecentsSort::MostRecent));
+                                selectable(DefaultRecentsSort::Sort(RecentsSort::LeastRecent));
+                                selectable(DefaultRecentsSort::Sort(RecentsSort::NameAscending));
+                                selectable(DefaultRecentsSort::Sort(RecentsSort::NameDescending));
+                            })
+                            .response
+                        )
+                    }
+                );
+                ui.setting_ui(
+                    LABEL_WIDTH,
+                    "Startup Recents Group By",
+                    "The way that recents are grouped together.",
+                    alt.next(),
+                    |ui| {
+                        record_change(&ComboBox::new("recents_list_group_by_combo", "")
+                            .selected_text(general.default_group_by.text())
+                            .width(150.0)
+                            .show_ui(ui, |ui| {
+                                let default_group_by = &mut general.default_group_by;
+                                let mut selectable = move |group_by: DefaultRecentsGroupBy| {
+                                    let select_resp = ui.selectable_value(default_group_by, group_by, group_by.text());
+                                    record_change(&select_resp);
+                                };
+                                selectable(DefaultRecentsGroupBy::Persist);
+                                selectable(DefaultRecentsGroupBy::GroupBy(GroupBy::Ungrouped));
+                                selectable(DefaultRecentsGroupBy::GroupBy(GroupBy::Day));
+                                selectable(DefaultRecentsGroupBy::GroupBy(GroupBy::Week));
+                                selectable(DefaultRecentsGroupBy::GroupBy(GroupBy::Month));
+                                selectable(DefaultRecentsGroupBy::GroupBy(GroupBy::Year));
+                                selectable(DefaultRecentsGroupBy::GroupBy(GroupBy::ProjectType(ProjectTypeGroupSort::new(0, 1, 2, 3))));
+                            }).response
+                        )
                     }
                 );
                 ui.setting_ui(
@@ -853,42 +960,15 @@ impl ProjectsGui {
                                         );
                                     }
                                 }
-                                // Grid::new("projects_settings")
-                                // .num_columns(2)
-                                // .striped(true)
-                                // .show(ui, |ui| {
-                                    
-                                //     ui.rtl_label(Align::Center, "Project Directories")
-                                //         .on_hover_text("The directories that will be searched for sub-directories/files to add to the project browser.");
-                                //     ui.vertical(|ui| {
-                                //         let _u = ScrollArea::new(Vec2b::new(false, true))
-                                //         .auto_shrink(Vec2b::new(false, true))
-                                //         // .max_width(200.0)
-                                //         .show(ui, |ui| {
-                                //             let dirs = projects.rust.project_directories.as_slice();
-                                //             for dir in dirs {
-                                //                 ui.label(format!("{}", dir.display())).on_hover_cursor(CursorIcon::Default);
-                                //             }
-                                //         });
-                                //         ui.horizontal(|ui| {
-                                //             if ui.button("Add Path").clicked() {
-                                //                 if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                                //                     projects.rust.project_directories.push(path);
-                                //                     changed.mark();
-                                //                 }
-                                //             }
-                                //         });
-                                //     });
-                                //     ui.end_row();
-                                // });
                             });
                         });
                     }
                     ProjectType::Python => {}
                     ProjectType::Web => {}
                     ProjectType::Other => {}
-                }
+                } // end match
             });
+            // end tabs
     }
 }
 
